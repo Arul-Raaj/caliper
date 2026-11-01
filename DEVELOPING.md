@@ -72,7 +72,7 @@ The command exits with 1 when it finds issues (so CI can fail on them), 2 on an 
 
 ## Publishing
 
-The public package is `caliper-css`: one minified file, `dist/caliper.js`, built by `scripts/bundle.mjs` (the page scripts in `browser/` are minified and inlined). Only `dist/caliper.js`, `LICENSE` and `README.md` ship; check with `npm pack --dry-run`. The source repo stays private. `prepack` runs the checks and the build, so `npm publish` can't ship a stale or failing build.
+The public package is `caliper-check`: one minified file, `dist/caliper.js`, built by `scripts/bundle.mjs` (the page scripts in `browser/` are minified and inlined). Only `dist/caliper.js`, `LICENSE` and `README.md` ship; check with `npm pack --dry-run`. The source repo stays private. `prepack` runs the checks and the build, so `npm publish` can't ship a stale or failing build.
 
 ## How it works
 

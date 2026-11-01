@@ -3,7 +3,7 @@
 Caliper opens your page in a real browser, feeds it the content real users bring, and shows you what breaks. Every issue comes with a screenshot, the measurement that proves it, and the CSS that fixes it.
 
 ```sh
-npx caliper-css https://your-site.com
+npx caliper-check https://your-site.com
 ```
 
 It works on anything with a URL: a live site, a preview deploy, or `http://localhost:3000`.
@@ -60,11 +60,11 @@ The first run downloads the browser Caliper drives (about 300 MB, once). After t
 ## Options
 
 ```sh
-npx caliper-css <url> --only narrow,long-text   # run some scenarios
-npx caliper-css <url> --ignore ".ticker"        # leave elements out
-npx caliper-css <url> --out ./reports/home      # choose the folder
-npx caliper-css <url> --no-fail                 # always exit 0
-npx caliper-css --help
+npx caliper-check <url> --only narrow,long-text   # run some scenarios
+npx caliper-check <url> --ignore ".ticker"        # leave elements out
+npx caliper-check <url> --out ./reports/home      # choose the folder
+npx caliper-check <url> --no-fail                 # always exit 0
+npx caliper-check --help
 ```
 
 To leave an element out from your own markup, add `data-caliper-ignore` to it.
