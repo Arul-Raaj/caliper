@@ -1,0 +1,49 @@
+{
+  "name": "caliper-css",
+  "version": "0.1.0",
+  "description": "Opens your page in a real browser, feeds it the content real users bring, and shows what breaks: overflow, clipped text, squashed images, tiny tap targets. With screenshots and the CSS fix.",
+  "keywords": [
+    "css",
+    "layout",
+    "overflow",
+    "responsive",
+    "qa",
+    "testing",
+    "playwright",
+    "accessibility",
+    "ui",
+    "cli"
+  ],
+  "author": "Arul Raaj",
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "bin": {
+    "caliper-css": "dist/caliper.js",
+    "caliper": "dist/caliper.js"
+  },
+  "files": [
+    "dist/caliper.js",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "node scripts/bundle.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "dev": "tsx src/cli.ts",
+    "prepack": "npm run check && npm run build"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fixture: fragile and robust components</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  section { margin-bottom: 40px; }
+
+  /* ---------- fragile: each of these should be flagged ---------- */
+  .f-card { width: 220px; border: 1px solid #ccc; padding: 12px; }
+  .f-card h3 { width: 196px; white-space: nowrap; margin: 0; }              /* content/spill */
+  .f-tag { width: 90px; overflow: hidden; white-space: nowrap; }          /* content/clip */
+  .f-row { display: flex; gap: 8px; width: 420px; }                        /* layout/flex-min-size */
+  .f-row > .name { font-weight: 600; }
+  .f-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; width: 600px; } /* layout/grid-min-size */
+  .f-banner { height: 48px; border: 1px solid #ccc; width: 300px; }       /* layout/fixed-size */
+  .f-wide { width: 900px; height: 20px; background: #eee; }               /* layout/page-overflow at 320 */
+  .f-photo { width: 200px; height: 200px; display: block; }               /* media/distortion */
+  .f-thumb { display: block; }                                            /* media/missing (no reserved size) */
+  .f-icon { width: 18px; height: 18px; padding: 0; border: 0; }           /* input/min-tap (two side by side) */
+  .f-pay { width: 160px; padding: 8px 12px; }                             /* content/label-wrap */
+  .f-cut { display: block; width: 120px; padding: 8px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* content/label-truncated */
+  .f-sheet { position: fixed; right: 0; bottom: 0; width: 180px; height: 460px; background: #fff; border: 1px solid #ccc; } /* layout/fixed-offscreen at 200% zoom */
+
+  /* ---------- robust: none of these should be flagged ---------- */
+  .r-card { max-width: 220px; border: 1px solid #ccc; padding: 12px; }
+  .r-card h3 { margin: 0; overflow-wrap: anywhere; }
+  .r-tag { width: 90px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .r-row { display: flex; flex-wrap: wrap; gap: 8px; max-width: 420px; }
+  .r-row > * { min-width: 0; overflow-wrap: anywhere; }
+  .r-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: 600px; }
+  .r-grid > * { overflow-wrap: anywhere; }
+  .r-banner { min-height: 48px; overflow-wrap: anywhere; border: 1px solid #ccc; max-width: 300px; }
+  .r-photo { width: 200px; height: 200px; object-fit: cover; display: block; }
+  .r-thumb { display: block; width: 200px; height: auto; aspect-ratio: 4 / 3; }
+  .r-button { min-width: 44px; min-height: 44px; }
+  .r-icon-wrap { padding: 24px; }
+  .r-icon { width: 18px; height: 18px; padding: 0; border: 0; }           /* small but alone: passes WCAG 2.5.8 */
+  .r-actions { display: flex; flex-wrap: wrap; gap: 8px; max-width: 160px; }
+  .r-pay { white-space: nowrap; padding: 8px 12px; }
+  .r-narrow { width: 200px; }
+  .r-longbtn { width: 100%; padding: 8px 12px; text-wrap: balance; } /* wraps only because one line can't fit */
+  .r-sheet { position: fixed; left: 0; bottom: 0; width: 180px; height: 460px; max-height: 100dvh; overflow-y: auto; background: #fff; border: 1px solid #ccc; }
+  .r-sheet p { overflow-wrap: anywhere; }
+  .r-sheet button { min-height: 44px; }
+  .r-select { position: relative; padding: 8px 12px; }
+  .r-select svg { position: absolute; top: -14px; left: 4px; width: 12px; height: 12px; }
+  .r-ticker { height: 24px; overflow: hidden; width: 200px; }
+  .r-ticker span { display: block; height: 24px; }
+  .r-logo { height: 32px; width: 120px; }
+  .r-logo svg { display: block; width: 120px; height: 36px; }
+  .r-deco { height: 20px; width: 60px; overflow: hidden; white-space: nowrap; }
+  .r-drawer { position: fixed; top: 0; left: 0; width: 260px; height: 100vh; transform: translateX(-100%); background: #fff; }
+  .f-clipcard { width: 268px; overflow: hidden; border: 1px solid #ccc; padding: 8px; } /* content/spill hidden by a clipping card */
+  .f-clipcard p { white-space: nowrap; margin: 0; }
+  .r-hit { position: relative; padding: 8px 12px; }                      /* a bigger invisible hit area is not overflow */
+  .r-hit::after { content: ""; position: absolute; inset: -12px; }
+  .r-mock { width: 100%; max-width: 300px; height: 120px; overflow: hidden; pointer-events: none; } /* a product mock-up cropped on purpose */
+  .r-mock .board { display: flex; gap: 12px; }
+  .r-mock .col { flex: none; width: 160px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+  <section class="fragile">
+    <div class="f-card"><h3 class="f-title">Quarterly report</h3></div>
+    <div class="f-tag">Design</div>
+    <div class="f-row"><span class="name">Alex</span><span class="role">Founding Product Designer</span></div>
+    <div class="f-grid"><div>One</div><div>Two</div><div>Three</div></div>
+    <div class="f-banner">Free shipping on all orders this week</div>
+    <div class="f-wide"></div>
+    <img class="f-photo" src="photo.svg" alt="Landscape">
+    <img class="f-thumb" src="photo.svg" alt="Thumbnail">
+    <span><button class="f-icon" aria-label="Close">×</button><button class="f-icon" aria-label="More">⋯</button></span>
+    <button class="f-pay">Pay ₹1,24,500 to Sharma Electricals</button>
+    <button class="f-cut">Confirm transfer to savings</button>
+    <div class="f-clipcard"><h4>Invoice</h4><p class="f-clipline">Payment received from Venkataraghavan Subramaniam for March</p></div>
+    <div class="f-sheet"><p>Chat with us</p><p>We usually reply within a day.</p><button>Start chat</button></div>
+  </section>
+
+  <section class="robust">
+    <div class="r-card"><h3>Quarterly report</h3></div>
+    <div class="r-tag">Design</div>
+    <div class="r-row"><span>Alex</span><span>Founding Product Designer</span></div>
+    <div class="r-grid"><div>One</div><div>Two</div><div>Three</div></div>
+    <div class="r-banner">Free shipping on all orders this week</div>
+    <img class="r-photo" src="photo.svg" alt="Landscape">
+    <img class="r-thumb" src="photo.svg" alt="Thumbnail">
+    <button class="r-button">OK</button>
+    <div class="r-icon-wrap"><button class="r-icon" aria-label="Close">×</button></div>
+    <div class="r-actions"><button class="r-pay">Pay ₹1,24,500</button><button class="r-pay">Cancel</button></div>
+    <div class="r-narrow"><button class="r-longbtn">Confirm and pay ₹1,24,500 to Sharma Electricals Private Limited, Chennai</button></div>
+    <div class="r-sheet"><p>Chat with us</p><p>We usually reply within a day.</p><button>Start chat</button></div>
+    <button class="r-select"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6l3 3 7-7" stroke="currentColor" fill="none"/></svg>India</button>
+    <div class="r-ticker"><span>Pay Roastery</span><span>Cartsy bezahlen</span><span>Showflix に支払う</span></div>
+    <div class="r-logo"><svg viewBox="0 0 120 36"><title>British Broadcasting Corporation</title><rect width="120" height="36" fill="#ccc"/></svg></div>
+    <div class="r-deco" aria-hidden="true">Decorative graphic label that runs long</div>
+    <textarea class="r-text" rows="2" cols="20">import React from 'react' import { View, Text } from 'react-native' and a lot more code here</textarea>
+    <div class="r-hitrow"><button class="r-hit">Products</button><button class="r-hit">Pricing</button></div>
+    <div class="r-mock"><div class="board"><div class="col">Backlog items</div><div class="col">In progress items</div><div class="col">Done items</div></div></div>
+    <nav class="r-drawer"><a href="#">Home</a><a href="#">Work</a><p>Closed menu text</p></nav>
+  </section>
+</main>
+</body>
+</html>
