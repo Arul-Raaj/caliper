@@ -1,21 +1,29 @@
 {
   "name": "caliper-check",
-  "version": "0.1.0",
-  "description": "Opens your page in a real browser, feeds it the content real users bring, and shows what breaks: overflow, clipped text, squashed images, tiny tap targets. With screenshots and the CSS fix.",
+  "version": "0.1.1",
+  "description": "Stress-test a web page in a real browser and see what breaks: overflow, clipped text, broken layouts and small tap targets, with screenshots and the CSS fix.",
   "keywords": [
     "css",
     "layout",
     "overflow",
     "responsive",
-    "qa",
-    "testing",
-    "playwright",
+    "visual-testing",
+    "ui-testing",
     "accessibility",
-    "ui",
+    "wcag",
+    "playwright",
     "cli"
   ],
   "author": "Arul Raaj",
-  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/Arul-Raaj/caliper#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arul-Raaj/caliper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Arul-Raaj/caliper/issues"
+  },
+  "license": "MIT",
   "type": "module",
   "bin": {
     "caliper-check": "dist/caliper.js",

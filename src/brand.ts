@@ -3,4 +3,4 @@
 export const NAME = "caliper";
 export const PACKAGE = "caliper-check"; // the npm name: npx caliper-check <url>
 export const DISPLAY_NAME = "Caliper";
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";

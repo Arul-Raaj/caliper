@@ -44,6 +44,6 @@ await build({
   sourcemap: false,
   external: ["playwright"],
   plugins: [inlineScripts],
-  banner: { js: `// ${pkg.name} ${pkg.version}. Copyright (c) 2026 Arul Raaj. Free to use, not to copy or modify. See LICENSE.` },
+  banner: { js: `// ${pkg.name} ${pkg.version}. MIT licence. https://github.com/Arul-Raaj/caliper` },
 });
 console.log("Built dist/caliper.js");
