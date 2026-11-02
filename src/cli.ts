@@ -25,7 +25,8 @@ Options
                        panel. Comma-separated or repeatable: --width 360,400
   --steps <file>       Also measure the states a JSON file scripts, such as
                        a sheet behind two clicks (see the README)
-  --no-interact        Don't open menus, hover or press Tab
+  --no-interact        Don't open menus, hover or press Tab. Scripted states
+                       from --steps still run
   --max-shots <n>      Screenshot at most n findings (default: 40)
   --ignore <selector>  Leave out matching elements (repeatable). Elements
                        with a data-caliper-ignore attribute are always left out

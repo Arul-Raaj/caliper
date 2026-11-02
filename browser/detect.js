@@ -72,7 +72,7 @@
     }
     return false;
   };
-  const textBox = (el, onlyShown = false) => {
+  const textBox = (el, shownOf = null) => {
     const box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity, lines: [] };
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
@@ -82,7 +82,7 @@
       const parent = node.parentElement;
       if (!parent || parent.closest("svg, [aria-hidden='true']") || !isVisible(parent) || positionedWithin(parent, el)) continue;
       range.selectNodeContents(node);
-      const shown = onlyShown ? shownBox(parent) : null;
+      const shown = shownOf?.(parent);
       for (const rect of range.getClientRects()) {
         // Text past an ellipsis still has a box, but nobody can see it.
         const r = shown ? { left: Math.max(rect.left, shown.left), top: Math.max(rect.top, shown.top), right: Math.min(rect.right, shown.right), bottom: Math.min(rect.bottom, shown.bottom), height: rect.height } : rect;
@@ -445,12 +445,12 @@
   const typesText = (el) => el.isContentEditable || el.matches("textarea, select, input:not([type=button], [type=submit], [type=reset], [type=checkbox], [type=radio], [type=range], [type=color], [type=file])");
 
   // The box around what a control shows: its text, its icons, its images.
-  const inkBox = (el) => {
-    const { left, top, right, bottom } = textBox(el, true);
+  const inkBox = (el, shownOf = shownBox) => {
+    const { left, top, right, bottom } = textBox(el, shownOf);
     const ink = { left, top, right, bottom };
     for (const part of el.querySelectorAll("svg, img")) {
       if (!isVisible(part)) continue;
-      const r = shownBox(part);
+      const r = shownOf(part);
       ink.left = Math.min(ink.left, r.left);
       ink.top = Math.min(ink.top, r.top);
       ink.right = Math.max(ink.right, r.right);
@@ -473,6 +473,12 @@
       shown.bottom = Math.min(shown.bottom, c.bottom);
     }
     return shown;
+  };
+
+  // The same, sideways only: a row scrolled below the fold still has a right edge.
+  const shownAcross = (el) => {
+    const { top, bottom } = el.getBoundingClientRect();
+    return { ...shownBox(el), top, bottom };
   };
 
   // ---------- 9. tooltips and popovers past the sides of the screen ----------
@@ -913,7 +919,7 @@
   if (checkBars) {
     // What a bar can land on: a control's own box when you can see it, or
     // else what it shows. A full-width row with padding keeps its text clear.
-    const reach = (el) => (isSurface(el) ? el.getBoundingClientRect().right : (inkBox(el)?.right ?? el.getBoundingClientRect().right));
+    const reach = (el) => (isSurface(el) ? el.getBoundingClientRect().right : (inkBox(el, shownAcross)?.right ?? el.getBoundingClientRect().right));
     // A carousel inside the scroller keeps its own overflow: what runs past
     // its edge isn't under the bar.
     const heldBelow = (c, el) => {
@@ -945,7 +951,8 @@
       const panelRight = panel ? panel.getBoundingClientRect().right - parseFloat(css(panel).borderRightWidth) : vw;
       const inset = Math.round(panelRight - r.right);
       const floats = !isSurface(el) && inset >= 4 && inset <= 48 && !besideIt(el, r);
-      const near = contentRight !== -Infinity && gap < 12;
+      // Under 4 px it touches the bar. The fixes leave at least that much.
+      const near = contentRight !== -Infinity && gap < 4;
       if (floats || near) push("bar-over-content", el, { right: Math.round(r.right), panelRight: Math.round(panelRight), inset: floats ? inset : 0, edge: Math.round(edge), contentRight: near ? Math.round(contentRight) : 0, gap: near ? Math.max(0, Math.round(gap)) : -1 });
     }
   }

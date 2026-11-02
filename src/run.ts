@@ -418,6 +418,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
   const shotsDir = `${options.outDir}/shots`;
 
   const ignore = options.ignore ?? [];
+  const explore = options.interact !== false;
   const detectSrc = await loadScript("detect.js");
   const stressSrc = await loadScript("stress.js");
 
@@ -527,7 +528,9 @@ export async function run(options: RunOptions): Promise<RunResult> {
       for (const kind of m.capped ?? []) capped.push({ scenario: scenario.id, rule: toRule(m.findings.find((f) => f.kind === kind)!, scenario) });
       try {
         await merge(scenario, page, m);
-        if (options.interact !== false && scenario.interact !== "none") await handle(scenario, page);
+        // --no-interact stops what Caliper finds alone. Scripted states were
+        // asked for by name, so they always run.
+        if (scenario.interact !== "none" && (explore || options.steps?.length)) await handle(scenario, page);
       } finally {
         if (!isBaseline) {
           await context.close();
@@ -544,7 +547,8 @@ export async function run(options: RunOptions): Promise<RunResult> {
         const done = await exercise<RawFinding, Measurement>({
           page,
           url: page.url(),
-          full: scenario.interact === "full",
+          opens: explore,
+          full: explore && scenario.interact === "full",
           scripted: options.steps ?? [],
           probe: <T>(request: Record<string, unknown>) => inPage<T>(page, scan(scenario, { probe: request })),
           measure: () => measure(page, scenario),

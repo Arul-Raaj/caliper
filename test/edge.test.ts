@@ -157,6 +157,8 @@ const hasRule = (r: RunResult, rule: string) => r.findings.find((f) => f.rule ==
 for (const [rule, fail, pass] of [
   ["scroll/bar-over-content", "bar-over-content-fail", "bar-over-content-pass"],
   ["scroll/bar-over-content", "bar-flush-fail", "bar-hidden-pass"],
+  ["scroll/bar-over-content", "bar-tight-fail", "bar-clear-pass"],
+  ["scroll/bar-over-content", "bar-fold-fail", "bar-fold-pass"],
   ["layout/control-past-container", "control-past-fail", "control-past-pass"],
   ["hover/fill-hugs-content", "hover-fill-fail", "hover-fill-pass"],
   ["hover/fill-hugs-content", "hover-corners-fail", "hover-corners-pass"],
@@ -182,6 +184,12 @@ test("a scrollbar at 383 px with content at 383 px in a 400 px panel is measured
 test("scrollbars take real room, so report screenshots show them", async () => {
   const f = hasRule(await check("bar-flush-fail", []), "scroll/bar-over-content");
   assert.match(f!.evidence, /0 px from the scrollbar at 385 px/);
+});
+
+test("the rule's own gutter fix passes the rule", async () => {
+  const css = RULES["scroll/bar-over-content"].fixes[1].css;
+  assert.match(css, /scrollbar-gutter: stable;\s+padding-right: 4px/);
+  assert.equal(hasRule(await check("bar-gutter-pass", []), "scroll/bar-over-content"), undefined);
 });
 
 test("a Send button 9 px past its composer is measured", async () => {
@@ -276,6 +284,18 @@ test("a scripted step that can't run makes the run partial", async () => {
   const steps = parseSteps(JSON.stringify([{ name: "Gone", steps: [{ click: ".not-here" }] }]));
   const r = await check("scripted-state", [], undefined, { steps });
   assert.match(r.incomplete[0]!.reason, /"Gone" stopped at/);
+});
+
+test("--no-interact still runs scripted states, and nothing else", async () => {
+  const steps = parseSteps(JSON.stringify([{ name: "Sheet", steps: [{ click: ".step-one" }, { click: ".step-two" }] }]));
+  const r = await check("scripted-state", [], undefined, { steps, interact: false });
+  assert.equal(hasRule(r, "overlay/offscreen-x")?.state, 'in "Sheet"');
+  assert.deepEqual(r.states, [{ scenario: "baseline", name: 'in "Sheet"' }]);
+
+  const menu = parseSteps(JSON.stringify([{ name: "Waited", steps: [{ wait: 1 }] }]));
+  const closed = await check("menu-trigger", [], undefined, { steps: menu, interact: false });
+  assert.deepEqual(closed.states.map((s) => s.name), ['in "Waited"']);
+  assert.equal(hasRule(closed, "overlay/offscreen-x"), undefined);
 });
 
 test("a bad steps file is refused with a reason", () => {

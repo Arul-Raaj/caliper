@@ -36,7 +36,7 @@ In each one it measures every element and checks 20 rules:
 | `content/label-wrap` | A button label wraps when one line would have fit in the row |
 | `content/label-truncated` | A button label is cut off with an ellipsis |
 | `layout/fixed-offscreen` | A fixed panel runs off a small screen and can't scroll |
-| `scroll/bar-over-content` | A scroller is inset from its panel, or its controls end within 12 px of the bar |
+| `scroll/bar-over-content` | A scroller is inset from its panel, or its controls end under 4 px from the bar |
 | `layout/control-past-container` | A control passes the edge of its nearest bordered or filled ancestor |
 | `hover/fill-hugs-content` | A hover fill has 0 px around its content, or square corners floating in a rounded surface |
 | `overlay/offscreen-x` | An open tooltip or popover runs past the left or right of the screen |
@@ -58,7 +58,7 @@ A scenario that fails is recorded in `incomplete` and the run carries on; checks
 
 ## The interaction pass
 
-`src/interact.ts` runs after a scenario's first measurement, one scenario at a time, because screenshots need the state on screen. Which scenarios: as is and `--width` do everything; the phone and dark mode only open things; the rest do none of it. `--no-interact` turns it off.
+`src/interact.ts` runs after a scenario's first measurement, one scenario at a time, because screenshots need the state on screen. Which scenarios: as is and `--width` do everything; the phone and dark mode only open things; the rest do none of it. `--no-interact` turns off what Caliper finds alone. Scripted states still run and are measured, without hovering or tabbing.
 
 - **Opening.** It clicks `[aria-haspopup]`, `[aria-expanded=false]` and closed `<details>` summaries, one per component and 12 per scenario (more is noted in the report). Each opened state is measured whole, then closed with Escape, a second click, or a reload. A finding that needed a state says which, in `state`. Inactive tabs aren't opened: use `--steps` for those.
 - **Steps.** `--steps` runs the states in a JSON file (`src/steps.ts`), each from a fresh page. A step that fails marks the scenario partial.
@@ -71,7 +71,7 @@ Waits are bounded: 1 s after opening, 300 ms after a hover or Tab, so a page tha
 
 `media/invisible-on-background` compares pixels, so it sees what reached the screen. It takes three full-page screenshots, however many images there are: as shown, images hidden, images inverted. A pixel that changes when inverted belongs to the image, so a transparent corner, an empty spacer or an image covered by something else never counts. It is a finding when almost nothing reaches 1.3:1 against what is behind it: under 12 pixels and under 1%. The count matters, because one thin line on a big white tile is under 1% and still plain to see. `src/pixels.ts` reads the PNGs with no dependencies. It covers `img` and `svg`, and skips one with its own CSS background or shadow, which sits on a plate; icon fonts and CSS background images aren't checked.
 
-Caliper's browser draws classic 15 px scrollbars everywhere (`--disable-features=OverlayScrollbar`). Removing `--hide-scrollbars` isn't enough on a Mac, where overlay bars take no room and don't show in screenshots. So `scroll/bar-over-content` measures from where the bar starts: content flush against a classic bar is the content an overlay bar lands on. A bar that takes no room was hidden on purpose, so it is skipped. Phones are skipped too, because their bars fade. Controls inside a carousel keep their own overflow and don't count.
+Caliper's browser draws classic 15 px scrollbars everywhere (`--disable-features=OverlayScrollbar`). Removing `--hide-scrollbars` isn't enough on a Mac, where overlay bars take no room and don't show in screenshots. So `scroll/bar-over-content` measures from where the bar starts: content flush against a classic bar is the content an overlay bar lands on. Under 4 px counts as touching the bar: anything wider is clear space, and the rule's own fixes leave at least that. Text and icons count wherever the row has scrolled to, so a row below the fold is judged like a visible one. A control's full box counts only if you can see it, so a padded transparent row stops at its text. A bar that takes no room was hidden on purpose, so it is skipped. Phones are skipped too, because their bars fade. Controls inside a carousel keep their own overflow and don't count.
 
 `text/word-broken` only reads text under `overflow-wrap: anywhere` or `break-word`, or `word-break`, since nothing else breaks a word. It skips text the stress test rewrote, the whole 63-letter scenario, `hyphens: auto`, URLs and codes, words over 30 letters and text clipped to nothing such as a skip link.
 

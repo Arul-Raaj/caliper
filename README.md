@@ -40,7 +40,7 @@ Caliper finds menus, sheets and accordions by their `aria-haspopup`, `aria-expan
 [{ "name": "Deep Dive", "steps": [{ "click": ".mode" }, { "click": ".deep" }, { "wait": 200 }] }]
 ```
 
-A step is one of `click`, `hover`, `fill` (with `value`), `press`, `waitFor` or `wait`. A step that can't run makes the run partial, so it never reads as clean.
+A step is one of `click`, `hover`, `fill` (with `value`), `press`, `waitFor` or `wait`. A step that can't run makes the run partial, so it never reads as clean. `--no-interact` leaves scripted states running.
 
 Add `data-caliper-ignore` to leave an element out from your own markup. The report is written to `caliper-report/index.html`, with the same findings in `report.json`.
 

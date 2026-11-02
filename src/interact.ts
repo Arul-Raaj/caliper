@@ -12,6 +12,7 @@ interface Target { selector: string; label: string; kind?: "row" | "icon" }
 export interface Driver<Raw, M> {
   page: Page;
   url: string;
+  opens: boolean; // find and open menus and sheets
   full: boolean; // hover and Tab as well as opening things
   scripted: ScriptedState[];
   probe: <T>(request: Record<string, unknown>) => Promise<T>;
@@ -106,7 +107,7 @@ export async function exercise<Raw, M>(d: Driver<Raw, M>, inPage: (expression: s
     await tabThrough();
   }
 
-  const triggers = fresh(await d.probe<Target[]>({ op: "triggers" }), new Set());
+  const triggers = d.opens ? fresh(await d.probe<Target[]>({ op: "triggers" }), new Set()) : [];
   const resting = await count();
   for (const trigger of triggers.slice(0, MAX_TRIGGERS)) {
     const clicked = await page.locator(trigger.selector).first().click({ timeout: CLICK_LIMIT_MS }).then(() => true, () => false);
