@@ -1,6 +1,6 @@
 {
   "name": "caliper-check",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Stress-test a web page in a real browser and see what breaks: overflow, clipped text, broken layouts and small tap targets, with screenshots and the CSS fix.",
   "keywords": [
     "css",
