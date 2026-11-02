@@ -4,7 +4,10 @@
 //
 // Plain JavaScript on purpose: Playwright sends this source to the browser
 // as-is, so it must not depend on anything outside itself.
-({ checkTapTargets, checkLabels, checkFixed, ignore }) => {
+//
+// With `probe` set it answers one question about the page as it is right now,
+// for the interaction pass (src/interact.ts), instead of measuring everything.
+({ checkTapTargets, checkLabels, checkFixed, checkBars, checkWords, ignore, probe }) => {
   if (!document.body) return { findings: [], images: [], pageWidth: 0, pageHeight: 0, viewportWidth: 0 };
   const MAX_PER_KIND = 25;
   const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "HEAD", "META", "LINK", "BR", "OPTION"]);
@@ -33,8 +36,13 @@
     // A hidden parent hides its children too, even though they keep their
     // layout: a closed menu (opacity: 0), a closed <details>, an accordion.
     if (el.checkVisibility?.({ opacityProperty: true, visibilityProperty: true }) === false || inCollapsed(el.parentElement)) return false;
-    // Screen-reader-only text is a 1 px box on purpose: not a visual bug.
-    if (s.clip === "rect(0px, 0px, 0px, 0px)" || s.clipPath === "inset(50%)") return false;
+    // Screen-reader-only text is clipped to nothing on purpose: not a visual
+    // bug. It comes as rect(0, 0, 0, 0), rect(1px, 1px, 1px, 1px) and the like.
+    if (s.clipPath === "inset(50%)") return false;
+    if (s.clip !== "auto") {
+      const [top, right, bottom, left] = s.clip.match(/-?[\d.]+(?=px)/g)?.map(Number) ?? [];
+      if (right <= left || bottom <= top) return false;
+    }
     const r = el.getBoundingClientRect();
     if (r.width <= 1 || r.height <= 1) return false;
     // Parked off canvas (a closed drawer): nobody can see it, so skip it.
@@ -64,7 +72,7 @@
     }
     return false;
   };
-  const textBox = (el) => {
+  const textBox = (el, onlyShown = false) => {
     const box = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity, lines: [] };
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
@@ -74,8 +82,11 @@
       const parent = node.parentElement;
       if (!parent || parent.closest("svg, [aria-hidden='true']") || !isVisible(parent) || positionedWithin(parent, el)) continue;
       range.selectNodeContents(node);
-      for (const r of range.getClientRects()) {
-        if (r.width < 1 || r.height < 1) continue;
+      const shown = onlyShown ? shownBox(parent) : null;
+      for (const rect of range.getClientRects()) {
+        // Text past an ellipsis still has a box, but nobody can see it.
+        const r = shown ? { left: Math.max(rect.left, shown.left), top: Math.max(rect.top, shown.top), right: Math.min(rect.right, shown.right), bottom: Math.min(rect.bottom, shown.bottom), height: rect.height } : rect;
+        if (r.right - r.left < 1 || r.bottom - r.top < 1) continue;
         box.left = Math.min(box.left, r.left);
         box.top = Math.min(box.top, r.top);
         box.right = Math.max(box.right, r.right);
@@ -148,7 +159,8 @@
   // page really has, so a coding agent can search for it. Images have no text,
   // so they go by their alt text or file name.
   const labelFor = (el) => {
-    const cls = typeof el.className === "string" && el.className.trim() ? "." + el.className.trim().split(/\s+/)[0] : "";
+    const classes = el.getAttribute("class")?.trim(); // an SVG's className isn't a string
+    const cls = classes ? "." + classes.split(/\s+/)[0] : "";
     const file = () => (el.currentSrc || el.src).split(/[?#]/)[0].split("/").filter((part) => /\.\w{2,5}$/.test(part)).pop();
     const name = el.tagName === "IMG" ? el.alt || file() : originalText(el);
     const text = (name || "").trim().replace(/\s+/g, " ");
@@ -379,6 +391,225 @@
     const after = withStyles(el, { height: "auto", "max-height": "none" }, () => el.getBoundingClientRect().height);
     return after > before + 2;
   };
+
+  // ---------- colours and surfaces ----------
+
+  // Computed colours can be oklch() or color(): a canvas turns any of them into sRGB.
+  const paint = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d", { willReadFrequently: true });
+  const colors = new Map();
+  const rgba = (color) => {
+    if (!colors.has(color)) {
+      paint.clearRect(0, 0, 1, 1);
+      paint.fillStyle = color;
+      paint.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = paint.getImageData(0, 0, 1, 1).data;
+      colors.set(color, { r, g, b, a: a / 255 });
+    }
+    return colors.get(color);
+  };
+  const over = (top, back) => ({ r: top.r * top.a + back.r * (1 - top.a), g: top.g * top.a + back.g * (1 - top.a), b: top.b * top.a + back.b * (1 - top.a), a: 1 });
+  const sameColor = (a, b) => Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b) <= 6;
+  const hexOf = ({ r, g, b }) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+
+  // The solid colour showing behind an element.
+  const backdropOf = (el) => {
+    const layers = [];
+    for (let n = el.parentElement; n; n = n.parentElement) {
+      const c = rgba(css(n).backgroundColor);
+      if (c.a === 0) continue;
+      layers.push(c);
+      if (c.a === 1) break;
+    }
+    return layers.reduceRight((back, c) => over(c, back), { r: 255, g: 255, b: 255, a: 1 });
+  };
+  const visibleFill = (el) => {
+    const c = rgba(css(el).backgroundColor);
+    if (c.a === 0) return false;
+    const back = backdropOf(el);
+    return !sameColor(over(c, back), back);
+  };
+
+  // A box you can see the edges of: filled, or outlined on at least three sides.
+  const isSurface = (el) => {
+    const s = css(el);
+    const sides = ["Top", "Right", "Bottom", "Left"].filter((side) => parseFloat(s[`border${side}Width`]) > 0 && s[`border${side}Style`] !== "none" && rgba(s[`border${side}Color`]).a > 0);
+    return sides.length >= 3 || s.backgroundImage !== "none" || visibleFill(el);
+  };
+  const surfaceOf = (el) => {
+    for (let n = el.parentElement; n && n !== document.body && n !== root; n = n.parentElement) if (isSurface(n)) return n;
+    return null;
+  };
+
+  const CONTROL = "a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=switch], [role=checkbox], [role=radio], [role=tab], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=option], [role=row], [role=treeitem], [tabindex]:not([tabindex='-1'])";
+  const inactive = (el) => el.matches(":disabled, [aria-disabled='true']");
+  const typesText = (el) => el.isContentEditable || el.matches("textarea, select, input:not([type=button], [type=submit], [type=reset], [type=checkbox], [type=radio], [type=range], [type=color], [type=file])");
+
+  // The box around what a control shows: its text, its icons, its images.
+  const inkBox = (el) => {
+    const { left, top, right, bottom } = textBox(el, true);
+    const ink = { left, top, right, bottom };
+    for (const part of el.querySelectorAll("svg, img")) {
+      if (!isVisible(part)) continue;
+      const r = shownBox(part);
+      ink.left = Math.min(ink.left, r.left);
+      ink.top = Math.min(ink.top, r.top);
+      ink.right = Math.max(ink.right, r.right);
+      ink.bottom = Math.max(ink.bottom, r.bottom);
+    }
+    return ink.right === -Infinity ? null : ink;
+  };
+
+  // The part of a box that it and its ancestors don't clip away.
+  const shownBox = (el) => {
+    const r = el.getBoundingClientRect();
+    const shown = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const s = css(n);
+      if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+      const c = n.getBoundingClientRect();
+      shown.left = Math.max(shown.left, c.left);
+      shown.top = Math.max(shown.top, c.top);
+      shown.right = Math.min(shown.right, c.right);
+      shown.bottom = Math.min(shown.bottom, c.bottom);
+    }
+    return shown;
+  };
+
+  // ---------- 9. tooltips and popovers past the sides of the screen ----------
+
+  const OVERLAY = "[role=tooltip], [role=menu], [role=listbox], [role=dialog], [role=alertdialog], dialog[open], [popover], [data-side], [data-popper-placement], [data-radix-popper-content-wrapper]";
+  const NAMED_OVERLAY = "[class*=tooltip i], [class*=popover i], [class*=dropdown i]";
+  const checkOverlays = () => {
+    const open = elements.filter((el) => el.matches(OVERLAY) || (el.matches(NAMED_OVERLAY) && /absolute|fixed/.test(css(el).position)));
+    for (const el of open) {
+      if (open.some((other) => other !== el && other.contains(el)) || !(el.textContent || "").trim()) continue;
+      const r = el.getBoundingClientRect();
+      // Wholly past the edge is parked, not open: a closed sheet waits there.
+      if (r.left >= vw || r.right <= 0) continue;
+      const [left, right] = [-r.left, r.right - vw];
+      if (Math.max(left, right) > 1) push("overlay-offscreen-x", el, { side: right >= left ? "right" : "left", past: Math.ceil(Math.max(left, right)), width: Math.round(r.width), viewportWidth: vw });
+    }
+  };
+
+  // ---------- questions for the interaction pass ----------
+
+  const LOOK = ["outlineStyle", "outlineWidth", "outlineColor", "outlineOffset", "boxShadow", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "borderTopWidth", "backgroundColor", "backgroundImage", "color", "textDecorationLine", "textDecorationColor", "opacity", "transform", "filter"];
+  const lookOf = (el, pseudo) => {
+    const s = getComputedStyle(el, pseudo);
+    return LOOK.map((k) => s[k]).join("|");
+  };
+  // Focus can show on the control, its ::before or ::after, a wrapper
+  // (:focus-within) or a part inside it.
+  const looks = (el) => {
+    const parts = [lookOf(el), lookOf(el, "::before"), lookOf(el, "::after")];
+    for (let n = el.parentElement, i = 0; n && n !== root && i < 3; n = n.parentElement, i++) parts.push(lookOf(n));
+    for (const c of [...el.children].slice(0, 6)) parts.push(lookOf(c));
+    return parts;
+  };
+  const sameLook = (a, b) => a.length === b.length && a.every((part, i) => part === b[i]);
+
+  const answer = () => ({ findings, images: [], pageWidth: root.scrollWidth });
+  const rowLike = (el, r) => css(el).display !== "inline" && !el.matches("input, textarea, select") && r.width >= 80 && r.height >= 16 && r.height <= 120 && r.width >= r.height * 2.5;
+  const hasText = (el) => textBox(el).right !== -Infinity;
+  const named = (el, r) => r.width <= 64 && r.height <= 64 && el.matches("[aria-label], [aria-describedby], [title], [data-tooltip], [data-tip]") && !hasText(el);
+  const usable = (el) => !inactive(el) && !decorative(el) && !cutOff(el);
+
+  const probes = {
+    count: () => rendered.length,
+
+    triggers: () => elements
+      .filter((el) => el.matches("[aria-haspopup]:not([aria-haspopup=false]), [aria-expanded=false], details:not([open]) > summary") && usable(el))
+      .map((el) => ({ selector: selectorFor(el), label: labelFor(el) })),
+
+    // How everything looks untouched, for hover and focus to compare with.
+    rest: () => {
+      document.activeElement?.blur?.();
+      const rest = (globalThis.__caliperRest = new WeakMap());
+      for (const el of elements) if (el.matches(CONTROL)) rest.set(el, { looks: looks(el), background: css(el).backgroundColor, fill: visibleFill(el) });
+      return true;
+    },
+
+    hoverTargets: () => elements.filter((el) => el.matches(CONTROL) && usable(el)).flatMap((el) => {
+      const r = el.getBoundingClientRect();
+      const kind = rowLike(el, r) && hasText(el) ? "row" : named(el, r) ? "icon" : null;
+      return kind ? [{ selector: selectorFor(el), label: labelFor(el), kind }] : [];
+    }),
+
+    hover: ({ selector }) => {
+      const el = document.querySelector(selector);
+      const before = el && globalThis.__caliperRest?.get(el);
+      if (before && el.matches(":hover") && !before.fill && css(el).backgroundColor !== before.background && visibleFill(el)) {
+        const ink = inkBox(el);
+        const shown = shownBox(el);
+        const gaps = ink ? { left: ink.left - shown.left, right: shown.right - ink.right, top: ink.top - shown.top, bottom: shown.bottom - ink.bottom } : {};
+        const [side, gap] = Object.entries(gaps).sort((a, b) => a[1] - b[1])[0] ?? [];
+        const fill = hexOf(over(rgba(css(el).backgroundColor), backdropOf(el)));
+        const surface = surfaceOf(el);
+        const s = css(el);
+        const square = ["TopLeft", "TopRight", "BottomLeft", "BottomRight"].every((c) => parseFloat(s[`border${c}Radius`]) === 0);
+        const round = surface ? parseFloat(css(surface).borderTopLeftRadius) : 0;
+        const c = surface?.getBoundingClientRect();
+        // A row running edge to edge is clipped by the surface: only a fill
+        // floating inside it shows its own corners.
+        const inset = c ? Math.max(shown.left - c.left, c.right - shown.right) : 0;
+        if (ink && gap < 1) push("hover-hug", el, { gap: Math.max(0, Math.round(gap)), side, fill });
+        else if (square && round >= 4 && inset >= 2) push("hover-hug", el, { corners: true, radius: Math.round(round), inset: Math.round(inset), fill });
+      }
+      checkOverlays();
+      return answer();
+    },
+
+    // One Tab stop: did anything change on the control now holding focus?
+    focus: () => {
+      const el = document.activeElement;
+      if (!el || el === document.body || el === root || el.tagName === "IFRAME") return { done: true, ...answer() };
+      const before = globalThis.__caliperRest?.get(el);
+      if (before && isVisible(el) && !ignored(el) && !decorative(el) && !typesText(el) && sameLook(looks(el), before.looks)) {
+        const s = css(el);
+        push("no-focus-ring", el, {
+          outline: `${s.outlineStyle === "none" ? "0px" : s.outlineWidth} ${s.outlineStyle}`,
+          shadow: s.boxShadow,
+          compared: LOOK.length,
+          reverts: withStyles(el, { outline: "revert" }, () => !sameLook(looks(el), before.looks)),
+        });
+      }
+      checkOverlays();
+      return { done: false, selector: selectorFor(el), ...answer() };
+    },
+
+    media: () => {
+      const list = rendered.filter((el) => {
+        if (!el.matches("img, svg") || ignored(el) || el.closest("[inert]") || el.parentElement.closest("svg")) return false;
+        // On its own background or shadow it sits on a plate, so it can't
+        // vanish into what is behind it.
+        const s = css(el);
+        if (rgba(s.backgroundColor).a > 0 || s.boxShadow !== "none") return false;
+        const r = el.getBoundingClientRect();
+        return r.width >= 8 && r.height >= 8 && (el.tagName !== "IMG" || (el.complete && el.naturalWidth > 0));
+      });
+      globalThis.__caliperMedia = list;
+      return list.map((el) => {
+        const control = el.tagName === "svg" && !el.querySelector("title") && el.closest("button, a[href], [role=button]");
+        return { selector: selectorFor(el), label: control ? `${labelFor(el)} in ${labelFor(control)}` : labelFor(el), role: "box", box: box(el) };
+      });
+    },
+
+    // Hide or invert every image for one screenshot, and put them back.
+    mediaStyle: ({ look }) => {
+      const worn = (globalThis.__caliperWorn ??= new Map());
+      for (const [el, saved] of worn) for (const [k, v, prio] of saved) v ? el.style.setProperty(k, v, prio) : el.style.removeProperty(k);
+      worn.clear();
+      if (!look) return true;
+      for (const el of globalThis.__caliperMedia ?? []) {
+        const filter = css(el).filter;
+        const styles = { transition: "none", animation: "none", ...(look === "hide" ? { visibility: "hidden" } : { filter: `${filter === "none" ? "" : `${filter} `}invert(1)` }) };
+        worn.set(el, Object.keys(styles).map((k) => [k, el.style.getPropertyValue(k), el.style.getPropertyPriority(k)]));
+        for (const [k, v] of Object.entries(styles)) el.style.setProperty(k, v, "important");
+      }
+      return true;
+    },
+  };
+  if (probe) return probes[probe.op](probe);
 
   // ---------- 1. the page scrolls sideways ----------
 
@@ -663,13 +894,149 @@
       if (!(el.textContent || "").trim()) continue;
       const below = r.bottom - vh;
       const above = -r.top;
-      if (Math.max(below, above) <= 8 || scrollsInside(el)) continue;
+      // A sideways page scrollbar takes its height from the screen, not from
+      // 100dvh. That is the page's overflow, which has its own card.
+      if (Math.max(below, above) <= 8 + vh - root.clientHeight || scrollsInside(el)) continue;
       // Test the cause: cap the height and see whether the panel fits.
       const fits = withStyles(el, { "max-height": "100dvh", "overflow-y": "auto" }, () => {
         const capped = el.getBoundingClientRect();
         return capped.bottom <= vh + 1 && capped.top >= -1;
       });
       push("fixed-offscreen", el, { height: Math.round(r.height), viewportHeight: vh, hidden: Math.round(Math.max(below, 0) + Math.max(above, 0)), fits });
+    }
+  }
+
+  checkOverlays();
+
+  // ---------- 10. scrollbars that land on content ----------
+
+  if (checkBars) {
+    // What a bar can land on: a control's own box when you can see it, or
+    // else what it shows. A full-width row with padding keeps its text clear.
+    const reach = (el) => (isSurface(el) ? el.getBoundingClientRect().right : (inkBox(el)?.right ?? el.getBoundingClientRect().right));
+    // A carousel inside the scroller keeps its own overflow: what runs past
+    // its edge isn't under the bar.
+    const heldBelow = (c, el) => {
+      for (let n = c.parentElement; n && n !== el; n = n.parentElement) if (css(n).overflowX !== "visible") return true;
+      return false;
+    };
+    const besideIt = (el, r) => [...(el.parentElement?.children ?? [])].some((sib) => {
+      if (sib === el || !isVisible(sib)) return false;
+      const o = sib.getBoundingClientRect();
+      return o.left >= r.right - 1 && o.top < r.bottom - 1 && o.bottom > r.top + 1;
+    });
+    for (const el of elements) {
+      const s = css(el);
+      if (!scrolls(s.overflowY) || el.scrollHeight <= el.clientHeight + 2 || el.clientHeight < 48 || FORM.has(el.tagName) || decorative(el)) continue;
+      // Caliper's browser draws classic bars, so a bar that takes no room was
+      // hidden on purpose (scrollbar-width: none, ::-webkit-scrollbar).
+      const r = el.getBoundingClientRect();
+      const borders = parseFloat(s.borderLeftWidth) + parseFloat(s.borderRightWidth);
+      if (el.offsetWidth - el.clientWidth - borders <= 0) continue;
+      const inside = [...el.querySelectorAll(CONTROL)].filter((c) => isVisible(c) && !inactive(c) && !heldBelow(c, el));
+      const contentRight = inside.length ? Math.max(...inside.map(reach)) : -Infinity;
+      // From where the bar starts, not the outer edge: content beside a
+      // classic bar is the same content an overlay bar would land on.
+      const edge = r.left + el.clientLeft + el.clientWidth;
+      const gap = edge - contentRight;
+      // A scroller with no edge of its own can't show where its bar belongs.
+      // Far from the panel's edge it is a column, not a misplaced gutter.
+      const panel = surfaceOf(el);
+      const panelRight = panel ? panel.getBoundingClientRect().right - parseFloat(css(panel).borderRightWidth) : vw;
+      const inset = Math.round(panelRight - r.right);
+      const floats = !isSurface(el) && inset >= 4 && inset <= 48 && !besideIt(el, r);
+      const near = contentRight !== -Infinity && gap < 12;
+      if (floats || near) push("bar-over-content", el, { right: Math.round(r.right), panelRight: Math.round(panelRight), inset: floats ? inset : 0, edge: Math.round(edge), contentRight: near ? Math.round(contentRight) : 0, gap: near ? Math.max(0, Math.round(gap)) : -1 });
+    }
+  }
+
+  // ---------- 11. controls past the edge of their container ----------
+
+  {
+    const isControl = (el) => (el.matches("a[href]") ? isButton(el) : el.matches("button, [role=button], input:not([type=hidden]), select, textarea, [role=switch], [role=tab]"));
+    const pastEdges = (el, c) => {
+      const r = el.getBoundingClientRect();
+      const s = css(el);
+      // A negative margin pulls a control past the edge on purpose.
+      const pulled = (side) => Math.min(0, parseFloat(s[`margin${side}`]) || 0);
+      return {
+        right: r.right + pulled("Right") - c.right,
+        left: c.left - r.left + pulled("Left"),
+        bottom: r.bottom + pulled("Bottom") - c.bottom,
+        top: c.top - r.top + pulled("Top"),
+      };
+    };
+    for (const el of elements) {
+      if (!isControl(el)) continue;
+      const surface = surfaceOf(el);
+      if (!surface || positionedWithin(el, surface) || decorative(el) || cutOff(el) || inSlot(el)) continue;
+      const c = surface.getBoundingClientRect();
+      const edges = pastEdges(el, c);
+      // Inside a scroller, passing the edge in the scroll direction is normal.
+      const rows = [];
+      for (let n = el.parentElement; n; n = n.parentElement) {
+        const s = css(n);
+        if (scrolls(s.overflowX)) edges.left = edges.right = 0;
+        if (scrolls(s.overflowY)) edges.top = edges.bottom = 0;
+        if (s.display.includes("flex") && !s.flexDirection.startsWith("column")) rows.push(n);
+        if (n === surface) break;
+      }
+      const [side, past] = Object.entries(edges).sort((a, b) => b[1] - a[1])[0];
+      if (past <= 2) continue;
+      // Test the cause: let every item in the rows shrink and see whether it comes back.
+      const items = rows.flatMap((row) => [...row.children].filter(isVisible));
+      const shrinks = items.length > 0 && trial(items, { "min-width": "0" }, () => pastEdges(el, c)[side] <= 2);
+      push("control-past", el, { side, past: Math.ceil(past), container: labelFor(surface), clipped: hides(css(surface).overflowX), shrinks });
+    }
+  }
+
+  // ---------- 12. words split across two lines ----------
+
+  if (checkWords) {
+    // Only an ordinary word counts: URLs and codes have to break, and
+    // anything longer than 30 letters belongs to content/long-word.
+    const WORD = /^[^\p{L}\d]*((?:\p{Script=Latin}|\p{Script=Cyrillic}|\p{Script=Greek}|\p{M}){3,30})[^\p{L}\d]*$/u;
+    const breakable = (s) => /anywhere|break-word/.test(s.overflowWrap) || /break-all|break-word/.test(s.wordBreak) || s.lineBreak === "anywhere";
+    const blockOf = (el) => {
+      let n = el;
+      while (n.parentElement && css(n).display.startsWith("inline")) n = n.parentElement;
+      return n;
+    };
+    const range = document.createRange();
+    const linesOf = (rects) => rects.some((r) => Math.abs(r.top - rects[0].top) >= rects[0].height * 0.5);
+    const rectsOf = (node, from, to) => {
+      range.setStart(node, from);
+      range.setEnd(node, to);
+      return [...range.getClientRects()].filter((r) => r.width >= 1);
+    };
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const done = new Set();
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const el = node.parentElement;
+      // Text the stress test rewrote isn't the page's own, so it proves nothing.
+      if (!el || done.has(el) || SKIP.has(el.tagName) || !node.nodeValue.trim() || globalThis.__caliperOriginal?.has(node)) continue;
+      const s = css(el);
+      if (!breakable(s) || s.hyphens === "auto" || el.closest("pre, code, kbd, samp, textarea, svg, [aria-hidden='true']") || ignored(el) || !isVisible(el) || decorative(el)) continue;
+      // A skip link clipped to nothing has no words to read until it is focused.
+      const shown = shownBox(el);
+      if (shown.right - shown.left <= 1 || shown.bottom - shown.top <= 1) continue;
+      for (const m of node.nodeValue.matchAll(/\S+/g)) {
+        const word = m[0].match(WORD)?.[1];
+        if (!word) continue;
+        const from = m.index + m[0].indexOf(word);
+        const to = from + word.length;
+        const rects = rectsOf(node, from, to);
+        if (rects.length < 2 || !linesOf(rects)) continue;
+        let split = 1;
+        while (split < word.length - 1 && !linesOf([rects[0], ...rectsOf(node, from + split, from + split + 1)])) split++;
+        const block = blockOf(el);
+        const b = css(block);
+        const whole = withStyles(el, { "overflow-wrap": "normal", "word-break": "normal", "line-break": "auto" }, () => !linesOf(rectsOf(node, from, to)) && textPast(block) <= 2);
+        push("word-broken", el, { word, head: word.slice(0, split), tail: word.slice(split), wordWidth: Math.ceil(rects.reduce((sum, r) => sum + r.width, 0)), room: Math.round(block.clientWidth - parseFloat(b.paddingLeft) - parseFloat(b.paddingRight)), whole });
+        done.add(el);
+        break;
+      }
     }
   }
 

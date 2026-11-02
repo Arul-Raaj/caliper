@@ -25,6 +25,22 @@
   .f-cut { display: block; width: 120px; padding: 8px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* content/label-truncated */
   .f-sheet { position: fixed; right: 0; bottom: 0; width: 180px; height: 460px; background: #fff; border: 1px solid #ccc; } /* layout/fixed-offscreen at 200% zoom */
 
+  .f-panel { width: 400px; height: 160px; background: #f4f4f5; }           /* scroll/bar-over-content */
+  .f-scroller { width: 383px; height: 160px; overflow-y: auto; }
+  .f-switchrow { display: flex; justify-content: space-between; height: 48px; }
+  .f-switch { width: 44px; height: 24px; padding: 0; background: #2563eb; border: 0; border-radius: 12px; }
+  .f-composer { box-sizing: border-box; width: 300px; padding: 12px; border: 1px solid #ccc; border-radius: 12px; } /* layout/control-past-container */
+  .f-composer div { display: flex; gap: 8px; }
+  .f-composer span { flex: none; width: 208px; }
+  .f-composer button { flex: none; width: 80px; }
+  .f-list { width: 240px; }
+  .f-list a { display: block; color: #111; text-decoration: none; }       /* hover/fill-hugs-content */
+  .f-list a:hover { background: #eee; }
+  .f-tip { position: fixed; top: 4px; left: calc(100vw - 80px); width: 160px; padding: 4px; background: #111; color: #fff; } /* overlay/offscreen-x */
+  .f-noring { outline: none; padding: 8px 12px; background: #eee; border: 0; } /* focus/no-visible-ring */
+  .f-table th { width: 40px; max-width: 40px; text-align: left; overflow-wrap: anywhere; } /* text/word-broken */
+  .f-pale { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; background: #f2f4f7; border: 0; } /* media/invisible-on-background */
+
   /* ---------- robust: none of these should be flagged ---------- */
   .r-card { max-width: 220px; border: 1px solid #ccc; padding: 12px; }
   .r-card h3 { margin: 0; overflow-wrap: anywhere; }
@@ -61,6 +77,22 @@
   .r-mock { width: 100%; max-width: 300px; height: 120px; overflow: hidden; pointer-events: none; } /* a product mock-up cropped on purpose */
   .r-mock .board { display: flex; gap: 12px; }
   .r-mock .col { flex: none; width: 160px; white-space: nowrap; }
+  .r-panel { max-width: 400px; height: 160px; background: #f4f4f5; }
+  .r-scroller { box-sizing: border-box; height: 160px; padding-right: 16px; overflow-y: auto; }
+  .r-switchrow { display: flex; justify-content: space-between; gap: 8px; min-height: 48px; }
+  .r-switchrow span { min-width: 0; overflow-wrap: anywhere; }
+  .r-switch { flex: none; width: 44px; height: 24px; padding: 0; background: #2563eb; border: 0; border-radius: 12px; }
+  .r-composer { box-sizing: border-box; max-width: 300px; padding: 12px; border: 1px solid #ccc; border-radius: 12px; }
+  .r-composer div { display: flex; gap: 8px; }
+  .r-composer span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .r-composer button { min-width: 0; max-width: 50%; overflow-wrap: anywhere; }
+  .r-list { max-width: 240px; }
+  .r-list a { display: block; padding: 8px 12px; border-radius: 8px; color: #111; text-decoration: none; overflow-wrap: anywhere; }
+  .r-list a:hover { background: #eee; }
+  .r-ring { padding: 8px 12px; background: #eee; border: 0; outline: none; }
+  .r-ring:focus-visible { box-shadow: 0 0 0 2px #2563eb; }
+  .r-table th { text-align: left; }
+  .r-solid { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: #1d4ed8; border: 0; }
 </style>
 </head>
 <body>
@@ -79,6 +111,18 @@
     <button class="f-cut">Confirm transfer to savings</button>
     <div class="f-clipcard"><h4>Invoice</h4><p class="f-clipline">Payment received from Venkataraghavan Subramaniam for March</p></div>
     <div class="f-sheet"><p>Chat with us</p><p>We usually reply within a day.</p><button>Start chat</button></div>
+    <div class="f-panel"><div class="f-scroller">
+      <div class="f-switchrow"><span>One</span><button class="f-switch" role="switch" aria-label="One"></button></div>
+      <div class="f-switchrow"><span>Two</span><button class="f-switch" role="switch" aria-label="Two"></button></div>
+      <div class="f-switchrow"><span>Three</span><button class="f-switch" role="switch" aria-label="Three"></button></div>
+      <div class="f-switchrow"><span>Four</span><button class="f-switch" role="switch" aria-label="Four"></button></div>
+    </div></div>
+    <div class="f-composer"><div><span>Sources</span><button class="f-send">Send</button></div></div>
+    <div class="f-list"><a class="f-hug" href="#hover">Recent documents</a></div>
+    <div class="f-tip" role="tooltip">A tip past the edge</div>
+    <p><button class="f-noring">No focus ring</button></p>
+    <table class="f-table"><tr><th class="f-word">Required</th><th>Name</th></tr></table>
+    <button class="f-pale" aria-label="Send icon"><svg class="f-white" width="20" height="20" viewBox="0 0 20 20"><path d="M2 10 18 2 12 18z" fill="#fff"/></svg></button>
   </section>
 
   <section class="robust">
@@ -102,6 +146,17 @@
     <div class="r-hitrow"><button class="r-hit">Products</button><button class="r-hit">Pricing</button></div>
     <div class="r-mock"><div class="board"><div class="col">Backlog items</div><div class="col">In progress items</div><div class="col">Done items</div></div></div>
     <nav class="r-drawer"><a href="#">Home</a><a href="#">Work</a><p>Closed menu text</p></nav>
+    <div class="r-panel"><div class="r-scroller">
+      <div class="r-switchrow"><span>One</span><button class="r-switch" role="switch" aria-label="One"></button></div>
+      <div class="r-switchrow"><span>Two</span><button class="r-switch" role="switch" aria-label="Two"></button></div>
+      <div class="r-switchrow"><span>Three</span><button class="r-switch" role="switch" aria-label="Three"></button></div>
+      <div class="r-switchrow"><span>Four</span><button class="r-switch" role="switch" aria-label="Four"></button></div>
+    </div></div>
+    <div class="r-composer"><div><span>Sources</span><button class="r-send">Send</button></div></div>
+    <div class="r-list"><a class="r-row" href="#hover">Recent documents</a></div>
+    <p><button class="r-ring">A focus ring</button></p>
+    <table class="r-table"><tr><th class="r-word">Required</th><th>Name</th></tr></table>
+    <button class="r-solid" aria-label="Send icon"><svg class="r-icon" width="20" height="20" viewBox="0 0 20 20"><path d="M2 10 18 2 12 18z" fill="#fff"/></svg></button>
   </section>
 </main>
 </body>

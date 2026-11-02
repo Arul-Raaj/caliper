@@ -21,7 +21,7 @@ export function promptParts(result: RunResult, f: Finding): { head: string; tail
     `Element: ${f.label}${"roles" in rule && f.role !== "box" ? ` (a ${ROLE_NAMES[f.role]})` : ""}`,
     `Path: ${f.selector}`,
     ...(similar.length ? ["Same problem in:", ...similar] : []),
-    `Seen in: ${f.scenarios.map((s) => label.get(s) ?? s).join(", ")}`,
+    `Seen in: ${f.scenarios.map((s) => label.get(s) ?? s).join(", ")}${f.state ? `, ${f.state}` : ""}`,
     `Measured: ${f.evidence}`,
     ...(f.cause ? [`${f.cause.confirmed ? "Cause (tested)" : "Likely cause (not tested)"}: ${f.cause.text}`] : []),
     `Why: ${rule.why}`,

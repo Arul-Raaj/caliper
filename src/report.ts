@@ -56,6 +56,9 @@ function html(result: RunResult): string {
   const cappedNote = result.capped.length
     ? `<p class="capnote">Some checks stopped at 25 findings in a scenario (${[...new Set(result.capped.map((c) => RULES[c.rule].title.toLowerCase()))].join("; ")}), so there may be more.</p>`
     : "";
+  const opened = [...new Set(result.states.map((s) => s.name))].length;
+  const statesNote = opened ? `<p class="capnote">Caliper also opened ${plural(opened, "state")} on this page and measured ${opened === 1 ? "it" : "each one"}.</p>` : "";
+  const notes = result.notes.map((n) => `<p class="capnote">${esc(n)}</p>`).join("");
   const sealedNote = result.unseen.share >= 0.1 && !mostly ? `<p class="capnote">Caliper can't see inside ${sealed} on this page, so ${result.unseen.frames + result.unseen.shadow === 1 ? "it wasn't" : "they weren't"} checked.</p>` : "";
 
   const scenarioRows = scenarioResults(result)
@@ -75,7 +78,7 @@ function html(result: RunResult): string {
   const card = (f: Finding) => {
     const rule = RULES[f.rule];
     const rec = recommend(rule, f.role);
-    const where = f.scenarios.map((s) => label.get(s) ?? s);
+    const where = [...f.scenarios.map((s) => label.get(s) ?? s), ...(f.state ? [f.state] : [])];
     // The role only shows where it picked the fix.
     const kicker = ["roles" in rule && f.role !== "box" ? ROLE_NAMES[f.role][0]!.toUpperCase() + ROLE_NAMES[f.role].slice(1) : "", where.join(", ")].filter(Boolean).join(" · ");
     const shot = (src: string | undefined, caption: string) =>
@@ -161,7 +164,7 @@ function html(result: RunResult): string {
   <section class="panel scenarios-panel" aria-labelledby="sc-h">
     <h2 id="sc-h" class="panel-title">Scenarios</h2>
     <ul class="scenarios">${scenarioRows}</ul>
-    ${cappedNote}${sealedNote}
+    ${cappedNote}${sealedNote}${statesNote}${notes}
   </section>
   ${
     findings.length

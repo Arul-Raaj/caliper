@@ -4,23 +4,28 @@
 import { mkdir } from "node:fs/promises";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { RULES, type Role, type RuleId } from "./rules.js";
-import { SCENARIOS, type Scenario } from "./scenarios.js";
+import { SCENARIOS, widthScenario, type Scenario } from "./scenarios.js";
 import { loadScript } from "./scripts.js";
 import { launchBrowser } from "./browser.js";
 import { inPage } from "./page.js";
+import { exercise, pattern, type Seen } from "./interact.js";
+import { decodePng, inkIn } from "./pixels.js";
+import type { ScriptedState } from "./steps.js";
 
 // ---------- types ----------
 
 interface Box { x: number; y: number; width: number; height: number }
 
 interface RawFinding {
-  kind: "page-overflow" | "spill-x" | "clip-x" | "flex-shrink" | "grid-blowout" | "fixed-height" | "img-distorted" | "tap-small" | "label-wrap" | "label-truncated" | "fixed-offscreen";
+  kind: "page-overflow" | "spill-x" | "clip-x" | "flex-shrink" | "grid-blowout" | "fixed-height" | "img-distorted" | "tap-small" | "label-wrap" | "label-truncated" | "fixed-offscreen" | "bar-over-content" | "control-past" | "hover-hug" | "overlay-offscreen-x" | "no-focus-ring" | "word-broken" | "invisible-media";
   selector: string;
   label: string;
   role: Role;
   box: Box;
   details: Record<string, number | string | boolean>;
 }
+
+type RawMedia = Pick<RawFinding, "selector" | "label" | "role" | "box">;
 
 interface RawImage { src: string; selector: string; label: string; width: number; height: number; box: Box; visible: boolean; around: { width: number; height: number; next: number } }
 
@@ -37,6 +42,7 @@ export interface Finding {
   evidence: string; // what was measured, with the numbers
   cause?: { text: string; confirmed: boolean }; // confirmed only when Caliper tested it
   scenarios: string[]; // scenario ids where it showed up
+  state?: string; // the opened state it needed, such as "with button "Menu" open"
   shots: { before?: string; after?: string; missing?: "limit" | "failed" }; // why there is no screenshot
   similar: { selector: string; label: string }[]; // other elements with the same structure and the same problem
 }
@@ -47,6 +53,9 @@ export interface RunOptions {
   scenarios?: string[];
   maxShots?: number;
   ignore?: string[]; // CSS selectors to leave out
+  widths?: number[]; // extra desktop widths to test, for side panels
+  steps?: ScriptedState[]; // scripted states to measure
+  interact?: boolean; // open menus, hover and tab (default: true)
   log?: (line: string) => void;
 }
 
@@ -72,6 +81,8 @@ export interface RunResult {
   incomplete: { scenario: string; reason: string }[];
   capped: { scenario: string; rule: RuleId }[];
   unseen: Unseen; // content sealed inside iframes and shadow roots
+  states: { scenario: string; name: string }[]; // what the interaction pass opened
+  notes: string[]; // anything else that shaped the result
 }
 
 // Most of the page sealed away means most of it wasn't checked.
@@ -102,6 +113,13 @@ function toRule(raw: RawFinding, scenario: Scenario): RuleId {
     case "label-wrap": return "content/label-wrap";
     case "label-truncated": return "content/label-truncated";
     case "fixed-offscreen": return "layout/fixed-offscreen";
+    case "bar-over-content": return "scroll/bar-over-content";
+    case "control-past": return "layout/control-past-container";
+    case "hover-hug": return "hover/fill-hugs-content";
+    case "overlay-offscreen-x": return "overlay/offscreen-x";
+    case "no-focus-ring": return "focus/no-visible-ring";
+    case "word-broken": return "text/word-broken";
+    case "invisible-media": return "media/invisible-on-background";
     case "clip-x": return "content/clip";
     case "spill-x":
       return scenario.stress === "long-word" || Number(d.longestWord) > 30 ? "content/long-word" : "content/spill";
@@ -134,6 +152,25 @@ function evidence(raw: RawFinding, scenario: Scenario): string {
       return `Its label needs ${d.contentWidth} px; the button shows ${d.boxWidth} px and ends in an ellipsis.`;
     case "fixed-offscreen":
       return `It is ${d.height} px tall on a ${d.viewportHeight} px screen, and ${d.hidden} px of it can't be scrolled into view.`;
+    case "bar-over-content": {
+      const inset = Number(d.inset) ? `Its right edge is at ${d.right} px, ${d.inset} px inside its ${d.panelRight} px panel.` : "";
+      const near = Number(d.gap) >= 0 ? `Its content reaches ${d.contentRight} px, ${d.gap} px from the scrollbar at ${d.edge} px.` : "";
+      return [inset, near].filter(Boolean).join(" ");
+    }
+    case "control-past":
+      return `It runs ${d.past} px past the ${d.side} edge of ${d.container}${d.clipped ? ", which cuts it off" : ""}.`;
+    case "hover-hug":
+      return d.corners
+        ? `Its ${d.fill} hover fill has 0 px corners, ${d.inset} px inside a surface with ${d.radius} px corners.`
+        : `Its ${d.fill} hover fill leaves ${d.gap} px between its ${d.side} edge and the content.`;
+    case "overlay-offscreen-x":
+      return `It is ${d.width} px wide and runs ${d.past} px past the ${d.side} edge of a ${d.viewportWidth} px screen.`;
+    case "no-focus-ring":
+      return `Tab reaches it with outline ${d.outline} and box-shadow ${d.shadow === "none" ? "none" : "unchanged"}. All ${d.compared} style properties Caliper compares match its unfocused state.`;
+    case "word-broken":
+      return `"${d.word}" breaks into "${d.head}" and "${d.tail}". The word needs ${d.wordWidth} px; the box gives ${d.room} px.`;
+    case "invisible-media":
+      return `It is ${d.ink} on ${d.back}, a contrast of ${d.contrast}:1. ${d.visible}% of its pixels stand out from what is behind them.`;
   }
 }
 
@@ -175,6 +212,18 @@ function cause(raw: RawFinding): { text: string; confirmed: boolean } | undefine
       return d.fits
         ? { text: "position: fixed with no max-height or scrolling. With max-height: 100dvh it fits.", confirmed: true }
         : { text: "position: fixed with no max-height or scrolling.", confirmed: false };
+    case "control-past":
+      return d.shrinks
+        ? { text: "The items in its row won't shrink below their content (min-width: auto). With min-width: 0 it stays inside.", confirmed: true }
+        : { text: "Its row is wider than its container. min-width: 0 alone didn't bring it back.", confirmed: false };
+    case "no-focus-ring":
+      return d.reverts
+        ? { text: "A style removes the outline and puts nothing in its place. With outline: revert the ring comes back.", confirmed: true }
+        : { text: "No focus style is set on it.", confirmed: false };
+    case "word-broken":
+      return d.whole
+        ? { text: "overflow-wrap or word-break lets the box shrink below the word. Set back to normal, the word stays whole.", confirmed: true }
+        : { text: "overflow-wrap or word-break lets the word break, and the box has no room for it whole.", confirmed: false };
     case "page-overflow":
       return d.right
         ? { text: "This element reaches furthest past the edge.", confirmed: false }
@@ -183,11 +232,6 @@ function cause(raw: RawFinding): { text: string; confirmed: boolean } | undefine
       return undefined;
   }
 }
-
-// "ul > li:nth-of-type(3) > a" and "ul > li:nth-of-type(4) > a" are the
-// same component, so they share the pattern "ul > li > a".
-// Numbered ids (#faq-3, #item_12) mark copies of one component too.
-const pattern = (selector: string) => selector.replace(/:nth-of-type\(\d+\)/g, "").replace(/(#[A-Za-z][\w-]*?)[-_]?\d+(?=$|[\s>.:[])/g, "$1-n");
 
 // ---------- page helpers ----------
 
@@ -219,13 +263,14 @@ const sameUrl = (a: string, b: string) => {
   return clean(a) === clean(b);
 };
 
-async function openPage(browser: Browser, scenario: Scenario, url: string): Promise<{ context: BrowserContext; page: Page; finalUrl: string }> {
+async function openPage(browser: Browser, scenario: Scenario, url: string): Promise<{ context: BrowserContext; page: Page; finalUrl: string; fitted: boolean }> {
   const context = await browser.newContext({
     viewport: scenario.viewport,
     deviceScaleFactor: scenario.deviceScaleFactor,
     isMobile: scenario.mobile,
     hasTouch: scenario.mobile,
     reducedMotion: "reduce",
+    colorScheme: scenario.colorScheme,
     ignoreHTTPSErrors: true, // local dev servers often use self-signed certificates
   });
   if (scenario.blockImages) {
@@ -233,6 +278,8 @@ async function openPage(browser: Browser, scenario: Scenario, url: string): Prom
       route.request().resourceType() === "image" ? route.abort() : route.continue(),
     );
   }
+  // A click that opens a new tab has left the page being tested.
+  context.on("page", (opened) => { if (context.pages().length > 1) opened.close().catch(() => {}); });
   const page = await context.newPage();
   const fail = async (message: string): Promise<never> => {
     await context.close();
@@ -259,18 +306,35 @@ async function openPage(browser: Browser, scenario: Scenario, url: string): Prom
     return fail(`${url} isn't a web page (it's ${type.split(";")[0]}). Give Caliper the address of an HTML page.`);
   }
 
-  // Wait for the page to finish: images and fonts, then the network, then
-  // the DOM. Apps that render after load (React, Vue) settle in the last step.
+  const fitted = await settle(page, scenario, () => fail(`${url} has no page body to test. Give Caliper the address of an HTML page.`));
+  return { context, page, finalUrl: page.url(), fitted };
+}
+
+// Wait for the page to finish: images and fonts, then the network, then
+// the DOM. Apps that render after load (React, Vue) settle in the last step.
+async function settle(page: Page, scenario: Scenario, noBody: () => Promise<never>): Promise<boolean> {
   await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => {});
   await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
   await inPage(page, `(${QUIET})()`);
-  if (!(await inPage<boolean>(page, "Boolean(document.body)"))) {
-    return fail(`${url} has no page body to test. Give Caliper the address of an HTML page.`);
-  }
+  if (!(await inPage<boolean>(page, "Boolean(document.body)"))) await noBody();
+  const fitted = scenario.mobile && (await inPage<boolean>(page, FIT));
   await inPage(page, `(${LAZY})()`);
   await inPage(page, `(${QUIET})()`);
-  return { context, page, finalUrl: page.url() };
+  return fitted;
 }
+
+// With no viewport tag, a phone lays a page out 980 px wide and zooms out, so
+// a 320 px scenario would quietly measure a desktop layout. Add the tag, so
+// the scenario tests the width it names. Pages meant for desktop, such as an
+// extension's side panel, often have none.
+const FIT = `(() => {
+  if (document.querySelector('meta[name="viewport" i]')) return false;
+  const tag = document.createElement("meta");
+  tag.name = "viewport";
+  tag.content = "width=device-width, initial-scale=1";
+  (document.head ?? document.documentElement).append(tag);
+  return true;
+})()`;
 
 // Resolves once the DOM has had no changes for 500 ms, or after 5 s. A web
 // font that never answers can't hold it up for more than 3 s.
@@ -347,7 +411,10 @@ export async function run(options: RunOptions): Promise<RunResult> {
   const log = options.log ?? (() => {});
   const maxShots = options.maxShots ?? 40;
   const started = Date.now();
-  const scenarios = SCENARIOS.filter((s) => s.id === "baseline" || !options.scenarios || options.scenarios.includes(s.id));
+  const scenarios = [
+    ...SCENARIOS.filter((s) => s.id === "baseline" || !options.scenarios || options.scenarios.includes(s.id)),
+    ...(options.widths ?? []).map(widthScenario),
+  ];
   const shotsDir = `${options.outDir}/shots`;
 
   const ignore = options.ignore ?? [];
@@ -358,6 +425,8 @@ export async function run(options: RunOptions): Promise<RunResult> {
   const byKey = new Map<string, Finding>();
   const incomplete: RunResult["incomplete"] = [];
   const capped: RunResult["capped"] = [];
+  const states: RunResult["states"] = [];
+  const notes: string[] = [];
   let shotCount = 0;
 
   // Scenarios open and measure in parallel (3 at a time), but merge one by
@@ -377,10 +446,45 @@ export async function run(options: RunOptions): Promise<RunResult> {
       testedUrl = baseline.finalUrl;
       log(`  Redirected to ${testedUrl}, so that is the page being tested`);
     }
+    const scan = (scenario: Scenario, extra?: Record<string, unknown>) =>
+      `(${detectSrc})(${JSON.stringify({ checkTapTargets: scenario.mobile, checkLabels: scenario.labels, checkFixed: scenario.checkFixed, checkBars: !scenario.mobile, checkWords: scenario.stress !== "long-word", ignore, ...extra })})`;
     const invalid = await inPage<string[]>(baseline.page, `${JSON.stringify(ignore)}.filter((s) => { try { document.querySelector(s); return false; } catch { return true; } })`);
     if (invalid.length) throw new Error(`--ignore "${invalid[0]}" isn't a valid CSS selector.`);
-    const measure = (page: Page, scenario: Scenario) =>
-      inPage<Measurement>(page, `(${detectSrc})(${JSON.stringify({ checkTapTargets: scenario.mobile, checkLabels: scenario.labels, checkFixed: scenario.checkFixed, ignore })})`);
+    const measure = async (page: Page, scenario: Scenario) => {
+      const m = await inPage<Measurement>(page, scan(scenario));
+      if (scenario.media) m.findings.push(...(await invisibleMedia(page, scenario)));
+      return m;
+    };
+
+    // Images that vanish into their background. Three full-page screenshots,
+    // whatever the number of images: as shown, images hidden, images inverted.
+    async function invisibleMedia(page: Page, scenario: Scenario): Promise<RawFinding[]> {
+      const media = (request: Record<string, unknown>) => inPage<RawMedia[]>(page, scan(scenario, { probe: request }));
+      const list = await media({ op: "media" });
+      if (!list.length) return [];
+      const picture = async (look?: string) => {
+        await media({ op: "mediaStyle", look });
+        return decodePng(await page.screenshot({ fullPage: true, scale: "css", animations: "disabled" }));
+      };
+      try {
+        const shown = await picture();
+        const behind = await picture("hide");
+        const inverted = await picture("invert");
+        const found: RawFinding[] = [];
+        for (const item of list) {
+          const ink = inkIn(shown, behind, inverted, item.box);
+          if (!ink?.vanishes) continue;
+          found.push({ ...item, kind: "invisible-media", details: { ink: ink.ink, back: ink.back, contrast: ink.contrast.toFixed(2), visible: Math.round(ink.visible * 100) } });
+        }
+        return found.slice(0, 25);
+      } catch {
+        notes.push(`Caliper couldn't compare image pixels ${scenario.phrase}, so images that vanish into their background weren't checked there.`);
+        return [];
+      } finally {
+        await media({ op: "mediaStyle" });
+      }
+    }
+
     const baselineMeasure = await measure(baseline.page, scenarios[0]!);
     if (baselineMeasure.empty) throw new Error(`${testedUrl} shows no text or images, so there's nothing to test. It may need a login, or it failed to render.`);
     unseen = baselineMeasure.unseen;
@@ -392,6 +496,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
       await acquire();
       try {
         const opened = await openPage(browser, scenario, testedUrl);
+        if (opened.fitted) notes.push("This page has no viewport tag, so a real phone would lay it out 980 px wide. The phone scenarios test it at their own width.");
         if (scenario.stress !== "none") {
           await inPage(opened.page, `(${stressSrc})(${JSON.stringify(scenario.stress)})`);
           await inPage(opened.page, SETTLE);
@@ -422,6 +527,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
       for (const kind of m.capped ?? []) capped.push({ scenario: scenario.id, rule: toRule(m.findings.find((f) => f.kind === kind)!, scenario) });
       try {
         await merge(scenario, page, m);
+        if (options.interact !== false && scenario.interact !== "none") await handle(scenario, page);
       } finally {
         if (!isBaseline) {
           await context.close();
@@ -431,7 +537,32 @@ export async function run(options: RunOptions): Promise<RunResult> {
     }
     await baseline.context.close();
 
-    async function merge(scenario: Scenario, page: Page, m: Measurement) {
+    // Measures what only shows after a click, a hover or a Tab. Screenshots
+    // need the state on screen, so this runs here, one scenario at a time.
+    async function handle(scenario: Scenario, page: Page) {
+      try {
+        const done = await exercise<RawFinding, Measurement>({
+          page,
+          url: page.url(),
+          full: scenario.interact === "full",
+          scripted: options.steps ?? [],
+          probe: <T>(request: Record<string, unknown>) => inPage<T>(page, scan(scenario, { probe: request })),
+          measure: () => measure(page, scenario),
+          record: (m, state) => merge(scenario, page, m, state),
+          reload: async () => {
+            await page.goto(testedUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            await settle(page, scenario, async () => { throw new Error("the page lost its body after a reload."); });
+          },
+        }, (expression) => inPage(page, expression));
+        for (const name of done.opened) states.push({ scenario: scenario.id, name });
+        if (done.skipped) notes.push(`${done.skipped} more menus and sheets weren't opened ${scenario.phrase}: Caliper opens 12 per scenario. Reach the others with --steps.`);
+        if (done.failed.length) incomplete.push({ scenario: scenario.id, reason: `scripted state ${done.failed.join("; ")}.` });
+      } catch (error) {
+        incomplete.push({ scenario: scenario.id, reason: scenarioError(error) });
+      }
+    }
+
+    async function merge(scenario: Scenario, page: Page, m: Measurement | Seen<RawFinding>, state?: string) {
       const isBaseline = scenario.id === "baseline";
       // `group` decides which findings share a card. Flex items that break
       // the same row are one problem, so they group by their row.
@@ -497,6 +628,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
           evidence: raw.text,
           ...(raw.cause ? { cause: raw.cause } : {}),
           scenarios: [scenario.id],
+          ...(state ? { state } : {}),
           shots: {},
           similar: [],
         };
@@ -508,7 +640,8 @@ export async function run(options: RunOptions): Promise<RunResult> {
           shotCount++;
           const after = `shots/${finding.id}-after.png`;
           if (await shoot(page, raw.selector, `${options.outDir}/${after}`, m.pageWidth)) finding.shots.after = after;
-          if (!isBaseline) {
+          // A state can't be shown "before": it isn't on the baseline's screen.
+          if (!isBaseline && !state) {
             const before = `shots/${finding.id}-before.png`;
             if (await shoot(baseline.page, raw.selector, `${options.outDir}/${before}`, baselineMeasure.pageWidth)) finding.shots.before = before;
           }
@@ -524,5 +657,5 @@ export async function run(options: RunOptions): Promise<RunResult> {
 
   const findings = ordered([...byKey.values()]);
 
-  return { url: options.url, testedUrl, startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, scenarios, findings, incomplete, capped, unseen };
+  return { url: options.url, testedUrl, startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, scenarios, findings, incomplete, capped, unseen, states, notes: [...new Set(notes)] };
 }

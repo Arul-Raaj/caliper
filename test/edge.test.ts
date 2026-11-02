@@ -3,11 +3,14 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
+import { deflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Server } from "node:http";
 import { recommend, RULES } from "../src/rules.ts";
-import { mostlyUnseen, run, type RunResult } from "../src/run.ts";
+import { mostlyUnseen, run, type RunOptions, type RunResult } from "../src/run.ts";
+import { decodePng, contrast } from "../src/pixels.ts";
+import { parseSteps } from "../src/steps.ts";
 import { serve } from "./serve.ts";
 
 let server: Server;
@@ -24,8 +27,8 @@ after(() => {
   server.close();
 });
 
-const check = async (page: string, scenarios: string[] = ["narrow"], ignore?: string[]): Promise<RunResult> =>
-  run({ url: `${base}edge/${page}.html`, outDir: await mkdtemp(join(tmpdir(), "caliper-edge-")), scenarios, maxShots: 0, ignore });
+const check = async (page: string, scenarios: string[] = ["narrow"], ignore?: string[], extra: Partial<RunOptions> = {}): Promise<RunResult> =>
+  run({ url: `${base}edge/${page}.html`, outDir: await mkdtemp(join(tmpdir(), "caliper-edge-")), scenarios, maxShots: 0, ignore, ...extra });
 
 const rules = (r: RunResult) => r.findings.map((f) => f.rule);
 const pageCards = (r: RunResult) => r.findings.filter((f) => f.rule === "layout/page-overflow");
@@ -92,7 +95,13 @@ test("a button label cut inside a span is caught", async () => {
 });
 
 test("nothing hidden is flagged: closed menus, accordions and details", async () => {
-  assert.deepEqual(rules(await check("hidden-things")), []);
+  assert.deepEqual(rules(await check("hidden-things", ["narrow"], undefined, { interact: false })), []);
+});
+
+test("what a closed details hides is measured once it is opened", async () => {
+  const r = await check("hidden-things");
+  assert.deepEqual(rules(r), ["input/min-tap"]);
+  assert.match(r.findings[0]!.state!, /summary "More" open/);
 });
 
 test("a logo's text-indent label isn't flagged", async () => {
@@ -139,4 +148,155 @@ test("every cause marked tested says what was tried", async () => {
   const r = await check("wrapper-clip", []);
   assert.match(r.findings[0]!.cause!.text, /Allowed to wrap/);
   assert.equal(r.findings[0]!.cause!.confirmed, true);
+});
+
+// ---------- every rule: one page that fails, one that passes ----------
+
+const hasRule = (r: RunResult, rule: string) => r.findings.find((f) => f.rule === rule);
+
+for (const [rule, fail, pass] of [
+  ["scroll/bar-over-content", "bar-over-content-fail", "bar-over-content-pass"],
+  ["scroll/bar-over-content", "bar-flush-fail", "bar-hidden-pass"],
+  ["layout/control-past-container", "control-past-fail", "control-past-pass"],
+  ["hover/fill-hugs-content", "hover-fill-fail", "hover-fill-pass"],
+  ["hover/fill-hugs-content", "hover-corners-fail", "hover-corners-pass"],
+  ["overlay/offscreen-x", "overlay-x-fail", "overlay-x-pass"],
+  ["focus/no-visible-ring", "focus-ring-fail", "focus-ring-pass"],
+  ["text/word-broken", "word-broken-fail", "word-broken-pass"],
+  ["media/invisible-on-background", "media-invisible-fail", "media-invisible-pass"],
+] as const) {
+  test(`${rule} fires on ${fail}`, async () => {
+    assert.ok(hasRule(await check(fail, []), rule));
+  });
+  test(`${rule} stays quiet on ${pass}`, async () => {
+    const r = await check(pass, []);
+    assert.deepEqual(r.findings.filter((f) => f.rule === rule).map((f) => f.evidence), []);
+  });
+}
+
+test("a scrollbar at 383 px with content at 383 px in a 400 px panel is measured", async () => {
+  const f = hasRule(await check("bar-over-content-fail", []), "scroll/bar-over-content");
+  assert.match(f!.evidence, /right edge is at 383 px, 17 px inside its 400 px panel/);
+});
+
+test("scrollbars take real room, so report screenshots show them", async () => {
+  const f = hasRule(await check("bar-flush-fail", []), "scroll/bar-over-content");
+  assert.match(f!.evidence, /0 px from the scrollbar at 385 px/);
+});
+
+test("a Send button 9 px past its composer is measured", async () => {
+  const f = hasRule(await check("control-past-fail", []), "layout/control-past-container");
+  assert.match(f!.evidence, /runs 9 px past the right edge/);
+  assert.equal(f!.cause!.confirmed, true);
+});
+
+test("a hover fill with no padding says how tight it is", async () => {
+  const f = hasRule(await check("hover-fill-fail", []), "hover/fill-hugs-content");
+  assert.match(f!.evidence, /leaves 0 px between its left edge/);
+});
+
+test("square corners are measured against the rounded surface", async () => {
+  const f = hasRule(await check("hover-corners-fail", []), "hover/fill-hugs-content");
+  assert.match(f!.evidence, /0 px corners, \d+ px inside a surface with 12 px corners/);
+});
+
+test("a hidden tooltip and a parked sheet aren't off screen", async () => {
+  assert.equal(hasRule(await check("overlay-x-closed", []), "overlay/offscreen-x"), undefined);
+});
+
+test("a missing focus ring is traced to the outline", async () => {
+  const f = hasRule(await check("focus-ring-fail", []), "focus/no-visible-ring");
+  assert.match(f!.evidence, /outline 0px none/);
+  assert.equal(f!.cause!.confirmed, true);
+});
+
+test("a table header split mid-word names both halves", async () => {
+  const f = hasRule(await check("word-broken-fail", []), "text/word-broken");
+  assert.match(f!.evidence, /"Required" breaks into "\w+" and "\w+"/);
+});
+
+test("the 63-letter word never counts as a broken word", async () => {
+  const r = await check("word-broken-pass", ["long-word"]);
+  assert.equal(hasRule(r, "text/word-broken"), undefined);
+});
+
+test("a white logo on white and a white icon on a pale fill are both caught", async () => {
+  const r = await check("media-invisible-fail", []);
+  const f = r.findings.filter((x) => x.rule === "media/invisible-on-background");
+  assert.deepEqual(f.map((x) => x.selector).sort(), ["body > button > svg", "body > img"]);
+  assert.match(f.find((x) => x.selector === "body > button > svg")!.evidence, /#ffffff on #f2f4f7, a contrast of 1\.\d+:1/);
+});
+
+// ---------- foundations ----------
+
+test("a phone scenario tests its own width on a page with no viewport tag", async () => {
+  const r = await check("no-viewport-tag");
+  assert.ok(hasRule(r, "layout/flex-min-size") || hasRule(r, "layout/page-overflow"), JSON.stringify(rules(r)));
+  assert.match(r.notes.join(), /no viewport tag/);
+});
+
+test("--width adds a desktop scenario at that width", async () => {
+  const r = await check("control-past-pass", [], undefined, { widths: [400] });
+  assert.deepEqual(r.scenarios.map((s) => s.id), ["baseline", "width-400"]);
+  assert.equal(r.scenarios[1]!.viewport.width, 400);
+  assert.equal(r.scenarios[1]!.mobile, false);
+});
+
+test("a dark logo that only vanishes in dark mode is caught there alone", async () => {
+  const r = await check("media-dark-only", ["dark"]);
+  const f = hasRule(r, "media/invisible-on-background");
+  assert.deepEqual(f?.scenarios, ["dark"]);
+});
+
+test("an opened menu is measured, and says which state it needed", async () => {
+  const r = await check("menu-trigger", []);
+  const f = hasRule(r, "overlay/offscreen-x");
+  assert.match(f!.state!, /with button.* "Sources" open/);
+  assert.equal(r.states.length, 1);
+});
+
+test("--no-interact leaves closed things closed", async () => {
+  const r = await check("menu-trigger", [], undefined, { interact: false });
+  assert.equal(hasRule(r, "overlay/offscreen-x"), undefined);
+  assert.deepEqual(r.states, []);
+});
+
+test("a tooltip that only opens on hover is measured", async () => {
+  assert.ok(hasRule(await check("tooltip-hover", []), "overlay/offscreen-x"));
+});
+
+test("--steps reaches a state behind two clicks", async () => {
+  const steps = parseSteps(JSON.stringify([{ name: "Sheet", steps: [{ click: ".step-one" }, { click: ".step-two" }] }]));
+  const r = await check("scripted-state", [], undefined, { steps });
+  assert.equal(hasRule(r, "overlay/offscreen-x")?.state, 'in "Sheet"');
+  assert.deepEqual(r.incomplete, []);
+});
+
+test("a scripted step that can't run makes the run partial", async () => {
+  const steps = parseSteps(JSON.stringify([{ name: "Gone", steps: [{ click: ".not-here" }] }]));
+  const r = await check("scripted-state", [], undefined, { steps });
+  assert.match(r.incomplete[0]!.reason, /"Gone" stopped at/);
+});
+
+test("a bad steps file is refused with a reason", () => {
+  assert.throws(() => parseSteps("not json"), /valid JSON/);
+  assert.throws(() => parseSteps("[]"), /list of states/);
+  assert.throws(() => parseSteps('[{"name":"A","steps":[{"jump":".x"}]}]'), /can't read/);
+});
+
+test("the PNG reader undoes every filter Playwright can write", () => {
+  // Two rows of 2 RGB pixels, filtered None then Paeth, gives the same pixels twice.
+  const raw = Buffer.from([0, 10, 20, 30, 40, 50, 60, 4, 0, 0, 0, 0, 0, 0]);
+  const chunk = (type: string, data: Buffer) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    return Buffer.concat([length, Buffer.from(type, "latin1"), data, Buffer.alloc(4)]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(2, 0);
+  header.writeUInt32BE(2, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const png = Buffer.concat([Buffer.alloc(8), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+  assert.deepEqual([...decodePng(png).data], [10, 20, 30, 40, 50, 60, 10, 20, 30, 40, 50, 60]);
+  assert.equal(Math.round(contrast([255, 255, 255], [0, 0, 0])), 21);
 });

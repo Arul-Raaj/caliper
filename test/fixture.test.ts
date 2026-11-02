@@ -45,6 +45,13 @@ const expectations: [string, string][] = [
   ["content/label-truncated", "f-cut"],
   ["content/spill", "f-clipline"],
   ["layout/fixed-offscreen", "f-sheet"],
+  ["scroll/bar-over-content", "f-scroller"],
+  ["layout/control-past-container", "f-send"],
+  ["hover/fill-hugs-content", "f-hug"],
+  ["overlay/offscreen-x", "f-tip"],
+  ["focus/no-visible-ring", "f-noring"],
+  ["text/word-broken", "f-word"],
+  ["media/invisible-on-background", "f-white"],
 ];
 
 for (const [rule, part] of expectations) {

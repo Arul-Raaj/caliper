@@ -4,12 +4,13 @@
 import { parseArgs } from "node:util";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { NAME, PACKAGE, DISPLAY_NAME, VERSION } from "./brand.js";
 import { mostlyUnseen, run, scenarioResults } from "./run.js";
 import { writeReport } from "./report.js";
 import { SCENARIO_IDS } from "./scenarios.js";
 import { RULES } from "./rules.js";
+import { parseSteps, type ScriptedState } from "./steps.js";
 
 const HELP = `${DISPLAY_NAME} ${VERSION}: stress-test a web page and report what breaks.
 
@@ -20,6 +21,11 @@ Options
   --out <dir>          Where to write the report (default: ./${NAME}-report)
   --only <ids>         Comma-separated scenarios to run (baseline always runs)
                        ${SCENARIO_IDS.filter((s) => s !== "baseline").join(", ")}
+  --width <px>         Also test a desktop window this wide, such as a side
+                       panel. Comma-separated or repeatable: --width 360,400
+  --steps <file>       Also measure the states a JSON file scripts, such as
+                       a sheet behind two clicks (see the README)
+  --no-interact        Don't open menus, hover or press Tab
   --max-shots <n>      Screenshot at most n findings (default: 40)
   --ignore <selector>  Leave out matching elements (repeatable). Elements
                        with a data-caliper-ignore attribute are always left out
@@ -30,6 +36,7 @@ Options
 Examples
   npx ${PACKAGE} https://example.com
   npx ${PACKAGE} http://localhost:3000/pricing --only narrow,long-text
+  npx ${PACKAGE} http://localhost:5173/panel --width 400 --steps states.json
 `;
 
 function readArgs() {
@@ -39,6 +46,9 @@ function readArgs() {
       options: {
         out: { type: "string" },
         only: { type: "string" },
+        width: { type: "string", multiple: true },
+        steps: { type: "string" },
+        "no-interact": { type: "boolean" },
         "max-shots": { type: "string" },
         ignore: { type: "string", multiple: true },
         "no-fail": { type: "boolean" },
@@ -103,6 +113,23 @@ async function main() {
     process.exit(2);
   }
 
+  const widths = [...new Set(values.width?.flatMap((w) => w.split(",")).map((w) => Number(w.trim())))];
+  if (widths.some((w) => !Number.isInteger(w) || w < 200 || w > 3840)) {
+    console.error(`--width takes a width in px between 200 and 3840, such as 400.`);
+    process.exit(2);
+  }
+
+  let steps: ScriptedState[] | undefined;
+  if (values.steps) {
+    try {
+      steps = parseSteps(readFileSync(values.steps, "utf8"));
+    } catch (error) {
+      const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+      console.error(missing ? `Couldn't find the steps file ${values.steps}.` : `The steps file ${values.steps} ${(error as Error).message}.`);
+      process.exit(2);
+    }
+  }
+
   const outDir = resolve(values.out ?? `${NAME}-report`);
   console.log(`${DISPLAY_NAME} is stressing ${url}`);
 
@@ -112,6 +139,9 @@ async function main() {
     scenarios: only,
     maxShots,
     ignore: values.ignore,
+    widths,
+    steps,
+    interact: !values["no-interact"],
     log: (line) => console.log(line),
   });
   await writeReport(result, outDir);
@@ -134,6 +164,9 @@ async function main() {
     for (const x of result.incomplete) console.log(`  ${labelFor.get(x.scenario)}: ${x.reason}`);
   }
   if (result.capped.length) console.log(`Some checks hit the limit of 25 findings per scenario, so there may be more.`);
+  const opened = new Set(result.states.map((s) => s.name)).size;
+  if (opened) console.log(`Opened and measured ${opened} ${opened === 1 ? "state" : "states"}.`);
+  for (const note of result.notes) console.log(note);
   if (mostlyUnseen(result)) console.log(`Partly checked: most of this page sits inside web components or iframes, which Caliper can't see into yet.`);
   const labelOf = new Map(result.scenarios.map((s) => [s.id, s.label]));
   for (const f of result.findings.slice(0, 10)) {

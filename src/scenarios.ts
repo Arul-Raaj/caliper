@@ -14,6 +14,9 @@ export interface Scenario {
   blockImages: boolean;
   labels: boolean; // check for button labels that wrap (real content only)
   checkFixed: boolean; // check fixed panels that run off a small screen
+  colorScheme: "light" | "dark";
+  media: boolean; // compare pixels to find images that vanish into their background
+  interact: "full" | "open" | "none"; // full hovers and tabs; open only opens menus and sheets
 }
 
 const DESKTOP = { width: 1280, height: 800 };
@@ -30,6 +33,9 @@ export const SCENARIOS: Scenario[] = [
     blockImages: false,
     labels: true,
     checkFixed: false,
+    colorScheme: "light",
+    media: true,
+    interact: "full",
   },
   {
     id: "long-text",
@@ -42,6 +48,9 @@ export const SCENARIOS: Scenario[] = [
     blockImages: false,
     labels: false,
     checkFixed: false,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
   },
   {
     id: "long-word",
@@ -54,6 +63,9 @@ export const SCENARIOS: Scenario[] = [
     blockImages: false,
     labels: false,
     checkFixed: false,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
   },
   {
     id: "broken-images",
@@ -66,6 +78,9 @@ export const SCENARIOS: Scenario[] = [
     blockImages: true,
     labels: false,
     checkFixed: false,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
   },
   {
     id: "narrow",
@@ -78,6 +93,9 @@ export const SCENARIOS: Scenario[] = [
     blockImages: false,
     labels: true,
     checkFixed: true,
+    colorScheme: "light",
+    media: false,
+    interact: "open",
   },
   {
     // A 1280 x 800 window at 200% browser zoom lays out exactly like a
@@ -92,6 +110,9 @@ export const SCENARIOS: Scenario[] = [
     blockImages: false,
     labels: true,
     checkFixed: true,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
   },
   {
     // WCAG 2.2, 1.4.12: text must survive line height 1.5, paragraph
@@ -106,6 +127,9 @@ export const SCENARIOS: Scenario[] = [
     blockImages: false,
     labels: true,
     checkFixed: false,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
   },
   {
     // The width where navs and grids most often fall between breakpoints.
@@ -119,7 +143,43 @@ export const SCENARIOS: Scenario[] = [
     blockImages: false,
     labels: true,
     checkFixed: false,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
+  },
+  {
+    // Same layout, other palette: logos and icons drawn for one theme vanish in the other.
+    id: "dark",
+    label: "Dark mode",
+    phrase: "in dark mode",
+    viewport: DESKTOP,
+    deviceScaleFactor: 1,
+    mobile: false,
+    stress: "none",
+    blockImages: false,
+    labels: false,
+    checkFixed: false,
+    colorScheme: "dark",
+    media: true,
+    interact: "open",
   },
 ];
+
+// A desktop window at a width of your choice, for side panels and extensions.
+export const widthScenario = (width: number): Scenario => ({
+  id: `width-${width}`,
+  label: `${width} px panel`,
+  phrase: `in a ${width} px panel`,
+  viewport: { width, height: 800 },
+  deviceScaleFactor: 2,
+  mobile: false,
+  stress: "none",
+  blockImages: false,
+  labels: true,
+  checkFixed: true,
+  colorScheme: "light",
+  media: true,
+  interact: "full",
+});
 
 export const SCENARIO_IDS = SCENARIOS.map((s) => s.id);

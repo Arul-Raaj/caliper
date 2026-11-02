@@ -669,6 +669,250 @@ img {
       },
     ],
   },
+  "scroll/bar-over-content": {
+    id: "scroll/bar-over-content",
+    title: "The scrollbar lands on the content",
+    severity: "medium",
+    why: "The scroller's edge sits inside its panel, or its controls run right up to that edge, so when the scrollbar appears it covers them or floats in the middle of the surface. It stays hidden until the content is long enough to scroll.",
+    fixes: [
+      {
+        title: "Move the padding inside the scroller",
+        when: "Best for most cases: the bar sits at the panel's edge and the content keeps clear of it.",
+        css: `.panel {
+  padding-right: 0;
+}
+.scroller {
+  padding-right: 16px;
+}`,
+      },
+      {
+        title: "Reserve the scrollbar's room",
+        when: "When the layout must not shift as content grows long enough to scroll.",
+        css: `.scroller {
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}`,
+      },
+      {
+        title: "Use a thin bar",
+        when: "For tight side panels where a full-width bar takes too much room.",
+        css: `.scroller {
+  scrollbar-width: thin;
+  padding-right: 12px;
+}`,
+      },
+    ],
+  },
+  "layout/control-past-container": {
+    id: "layout/control-past-container",
+    title: "A control runs past the edge of its container",
+    severity: "high",
+    why: "The row holding the control is wider than the box drawn around it, so the button breaks out of the composer, card or toolbar it belongs to. Usually something beside it won't shrink.",
+    fixes: [
+      {
+        title: "Let the row's other items shrink",
+        when: "Best for most cases: the control stays in place and its neighbours give way.",
+        css: `.row {
+  display: flex;
+  min-width: 0;
+}
+.row > .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row > .control {
+  flex: none;
+}`,
+      },
+      {
+        title: "Let the row wrap",
+        when: "When every item must stay whole and the box can grow taller.",
+        css: `.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}`,
+      },
+      {
+        title: "Give the control its own column",
+        when: "For composers and toolbars with one fixed action.",
+        css: `.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}`,
+      },
+    ],
+  },
+  "hover/fill-hugs-content": {
+    id: "hover/fill-hugs-content",
+    title: "A hover fill sits tight against its content",
+    severity: "medium",
+    why: "The row has no padding of its own, so its hover fill stops exactly at the text, or its square corners sit inside a rounded surface. At rest nothing shows it; on hover the row looks cut out.",
+    fixes: [
+      {
+        title: "Pad the row",
+        when: "Best for most cases: the fill gets room around the content.",
+        css: `.row {
+  padding: 8px 12px;
+  border-radius: 8px;
+}`,
+      },
+      {
+        title: "Let the fill reach past the content",
+        when: "When the text must stay aligned with the headings around it.",
+        css: `.row {
+  margin-inline: -12px;
+  padding-inline: 12px;
+  border-radius: 8px;
+}`,
+      },
+      {
+        title: "Run the fill edge to edge",
+        when: "For lists in a rounded card: the card's corners clip the fill.",
+        css: `.card {
+  overflow: hidden;
+}
+.row {
+  margin-inline: 0;
+  border-radius: 0;
+  padding: 8px 16px;
+}`,
+      },
+    ],
+  },
+  "overlay/offscreen-x": {
+    id: "overlay/offscreen-x",
+    title: "A tooltip or popover runs off the side of the screen",
+    severity: "high",
+    why: "It is placed against its trigger with no check for the screen edge, so a trigger near the side pushes it out of view. Narrow side panels and phones make it common.",
+    fixes: [
+      {
+        title: "Keep it inside the screen",
+        when: "Best for most cases: it flips and shifts to stay in view.",
+        css: `/* With Floating UI, also used by Radix */
+computePosition(trigger, tooltip, {
+  middleware: [flip(), shift({ padding: 8 })],
+});`,
+      },
+      {
+        title: "Anchor it to the nearer edge",
+        when: "When a trigger always sits at the same side of the screen.",
+        css: `.tooltip {
+  left: auto;
+  right: 0;
+  transform: none;
+}`,
+      },
+      {
+        title: "Cap its width",
+        when: "For long text in narrow panels. Use it with either fix above.",
+        css: `.tooltip {
+  max-width: calc(100vw - 16px);
+  overflow-wrap: anywhere;
+}`,
+      },
+    ],
+  },
+  "focus/no-visible-ring": {
+    id: "focus/no-visible-ring",
+    title: "Keyboard focus doesn't show",
+    severity: "high",
+    why: "Nothing changes when Tab reaches this control, so anyone using a keyboard can't tell where they are (WCAG 2.2, 2.4.7). A reset that sets outline: none is the usual cause.",
+    fixes: [
+      {
+        title: "Add a focus ring",
+        when: "Best for most cases: it shows for keyboard users, not on mouse clicks.",
+        css: `.control:focus-visible {
+  outline: 2px solid var(--focus, currentColor);
+  outline-offset: 2px;
+}`,
+      },
+      {
+        title: "Ring it with a shadow",
+        when: "When the ring must follow rounded corners on older browsers.",
+        css: `.control:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--focus);
+}`,
+      },
+      {
+        title: "Ring the wrapper",
+        when: "For a control that sits inside a composer or field box.",
+        css: `.field:has(:focus-visible) {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}`,
+      },
+    ],
+  },
+  "text/word-broken": {
+    id: "text/word-broken",
+    title: "A word breaks across two lines",
+    severity: "medium",
+    why: "overflow-wrap: anywhere or word-break lets the box shrink below its longest word, so a short word splits in the middle, as in \"Requir / ed\". That rule is for long URLs and codes, not ordinary words.",
+    fixes: [
+      {
+        title: "Break only what can't fit",
+        when: "Best for most cases: long URLs still wrap, and the box won't shrink below an ordinary word.",
+        css: `.element {
+  word-break: normal;
+  overflow-wrap: break-word;
+}`,
+      },
+      {
+        title: "Keep the column as wide as its label",
+        when: "For table headers and short labels.",
+        css: `th {
+  white-space: nowrap;
+}`,
+      },
+      {
+        title: "Hyphenate",
+        when: "For running text in a known language. Needs a lang attribute on the page.",
+        css: `.element {
+  hyphens: auto;
+  overflow-wrap: break-word;
+}`,
+      },
+    ],
+  },
+  "media/invisible-on-background": {
+    id: "media/invisible-on-background",
+    title: "An image or icon vanishes into its background",
+    severity: "high",
+    why: "It has almost no contrast with what is behind it, such as a white logo on white or a white icon on a pale fill. It was often drawn for the other theme, so it looks fine in one and disappears in the other.",
+    fixes: [
+      {
+        title: "Use a version made for this background",
+        when: "Best for logos: serve a light and a dark file.",
+        css: `<picture>
+  <source srcset="logo-light.svg" media="(prefers-color-scheme: dark)">
+  <img src="logo-dark.svg" alt="Company name">
+</picture>`,
+      },
+      {
+        title: "Draw icons in currentColor",
+        when: "Best for icons: they follow the text colour in every theme and state.",
+        css: `.icon {
+  color: var(--text);
+  fill: currentColor;
+}`,
+      },
+      {
+        title: "Put it on a plate",
+        when: "When the image can't change, such as a customer's logo.",
+        css: `.logo {
+  padding: 8px;
+  background: var(--plate);
+  border-radius: 8px;
+}`,
+      },
+    ],
+  },
 } as const satisfies Record<string, Rule>;
 
 export type RuleId = keyof typeof RULES;
