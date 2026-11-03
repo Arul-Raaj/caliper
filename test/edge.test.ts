@@ -166,6 +166,7 @@ for (const [rule, fail, pass] of [
   ["focus/no-visible-ring", "focus-ring-fail", "focus-ring-pass"],
   ["text/word-broken", "word-broken-fail", "word-broken-pass"],
   ["media/invisible-on-background", "media-invisible-fail", "media-invisible-pass"],
+  ["media/square-in-round", "media-square-round-fail", "media-square-round-pass"],
 ] as const) {
   test(`${rule} fires on ${fail}`, async () => {
     assert.ok(hasRule(await check(fail, []), rule));
@@ -233,6 +234,14 @@ test("a white logo on white and a white icon on a pale fill are both caught", as
   const f = r.findings.filter((x) => x.rule === "media/invisible-on-background");
   assert.deepEqual(f.map((x) => x.selector).sort(), ["body > button > svg", "body > img"]);
   assert.match(f.find((x) => x.selector === "body > button > svg")!.evidence, /#ffffff on #f2f4f7, a contrast of 1\.\d+:1/);
+});
+
+test("a square app icon shrunk into a circle is caught on dark and on light", async () => {
+  const r = await check("media-square-round-fail", []);
+  const f = r.findings.filter((x) => x.rule === "media/square-in-round");
+  const caught = f.flatMap((x) => [x.selector, ...x.similar.map((s) => s.selector)]).sort();
+  assert.deepEqual(caught, ["body > span:nth-of-type(1) > img", "body > span:nth-of-type(2) > img"]);
+  assert.match(f[0]!.evidence, /28 × 28 px inside a 40 × 40 px box with 20 px corners, and 4 of its own square corners show/);
 });
 
 // ---------- foundations ----------

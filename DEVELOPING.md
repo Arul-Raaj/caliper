@@ -19,7 +19,7 @@ Each run loads the page in 9 scenarios, 3 at a time, plus one per `--width`:
 | Dark mode | `prefers-color-scheme: dark`, for logos and icons drawn for one theme |
 | `--width <px>` | A desktop window that wide with classic scrollbars, for side panels |
 
-In each one it measures every element and checks 20 rules:
+In each one it measures every element and checks 21 rules:
 
 | Rule | What it catches |
 | --- | --- |
@@ -43,6 +43,7 @@ In each one it measures every element and checks 20 rules:
 | `focus/no-visible-ring` | Tab reaches a control and nothing about it changes (WCAG 2.4.7) |
 | `text/word-broken` | An ordinary word splits across two lines, like "Requir / ed" |
 | `media/invisible-on-background` | An image or icon has almost no contrast with what is behind it |
+| `media/square-in-round` | An opaque square image, smaller than the circle or pill around it, shows its corners inside the curve |
 
 Copies of the same component (list items, cards) share one card in the report, with the other copies listed under it.
 
@@ -70,6 +71,8 @@ Waits are bounded: 1 s after opening, 300 ms after a hover or Tab, so a page tha
 ## How the new checks measure
 
 `media/invisible-on-background` compares pixels, so it sees what reached the screen. It takes three full-page screenshots, however many images there are: as shown, images hidden, images inverted. A pixel that changes when inverted belongs to the image, so a transparent corner, an empty spacer or an image covered by something else never counts. It is a finding when almost nothing reaches 1.3:1 against what is behind it: under 12 pixels and under 1%. The count matters, because one thin line on a big white tile is under 1% and still plain to see. `src/pixels.ts` reads the PNGs with no dependencies. It covers `img` and `svg`, and skips one with its own CSS background or shadow, which sits on a plate; icon fonts and CSS background images aren't checked.
+
+`media/square-in-round` reuses those three screenshots. It looks at an image inside a clearly round box (corners at least a quarter of its shorter side) that doesn't fill it. Images don't have to fill their box: only an opaque square counts, meaning 85% of the image's outer edge is its own pixels. A logo on a transparent background never counts, however far its mark reaches, and neither does a rounded image or a photo kept at its aspect ratio in a square box. The square's corners show when its edge stands out from the round box at 1.3:1, or when a pixel right at a corner does, like the pale corners of a dark app icon on a dark circle.
 
 Caliper's browser draws classic 15 px scrollbars everywhere (`--disable-features=OverlayScrollbar`). Removing `--hide-scrollbars` isn't enough on a Mac, where overlay bars take no room and don't show in screenshots. So `scroll/bar-over-content` measures from where the bar starts: content flush against a classic bar is the content an overlay bar lands on. Under 4 px counts as touching the bar: anything wider is clear space, and the rule's own fixes leave at least that. Text and icons count wherever the row has scrolled to, so a row below the fold is judged like a visible one. A control's full box counts only if you can see it, so a padded transparent row stops at its text. A bar that takes no room was hidden on purpose, so it is skipped. Phones are skipped too, because their bars fade. Controls inside a carousel keep their own overflow and don't count.
 
@@ -115,7 +118,7 @@ src/interact.ts    opens menus and sheets, runs scripted states, hovers and tabs
 src/steps.ts       reads and runs a --steps file
 src/pixels.ts      reads screenshots and finds images that vanish
 src/scenarios.ts   the 9 scenarios, and the --width one
-src/rules.ts       the 20 rules, and the fixes by element role (recommended first)
+src/rules.ts       the 21 rules, and the fixes by element role (recommended first)
 src/prompt.ts      the prompt the report copies
 src/report.ts      writes index.html and report.json
 browser/stress.js  runs inside the page: lengthens text, applies text spacing

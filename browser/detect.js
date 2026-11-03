@@ -594,9 +594,29 @@
         return r.width >= 8 && r.height >= 8 && (el.tagName !== "IMG" || (el.complete && el.naturalWidth > 0));
       });
       globalThis.__caliperMedia = list;
+      // The nearest of three ancestors that draws a clearly round shape (a
+      // circle, a pill, a squircle) around the image without the image filling
+      // it, so the image's own corners land inside the curve. An image that
+      // fills its round box is cut by the curve and can't show corners.
+      const roundAround = (el) => {
+        const r = el.getBoundingClientRect();
+        for (let up = el.parentElement, i = 0; up && i < 3; up = up.parentElement, i++) {
+          const u = up.getBoundingClientRect();
+          const s = css(up);
+          const radius = Math.min(parseFloat(s.borderTopLeftRadius) || 0, u.width / 2, u.height / 2);
+          if (radius < Math.min(u.width, u.height) * 0.25) continue;
+          const drawn = s.overflow !== "visible" || rgba(s.backgroundColor).a > 0 || s.boxShadow !== "none" || parseFloat(s.borderTopWidth) > 0;
+          if (!drawn) continue;
+          const inside = r.left >= u.left - 0.5 && r.top >= u.top - 0.5 && r.right <= u.right + 0.5 && r.bottom <= u.bottom + 0.5;
+          const fills = r.width >= u.width - 1 && r.height >= u.height - 1;
+          return inside && !fills ? { box: box(up), radius: Math.round(radius) } : null;
+        }
+        return null;
+      };
       return list.map((el) => {
         const control = el.tagName === "svg" && !el.querySelector("title") && el.closest("button, a[href], [role=button]");
-        return { selector: selectorFor(el), label: control ? `${labelFor(el)} in ${labelFor(control)}` : labelFor(el), role: "box", box: box(el) };
+        const round = roundAround(el);
+        return { selector: selectorFor(el), label: control ? `${labelFor(el)} in ${labelFor(control)}` : labelFor(el), role: "box", box: box(el), ...(round ? { round } : {}) };
       });
     },
 

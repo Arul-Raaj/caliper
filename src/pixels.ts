@@ -113,3 +113,53 @@ export function inkIn(shown: Raster, behind: Raster, inverted: Raster, area: Are
   const vanishes = visible < Math.min(12, inked * 0.01);
   return { ink: hex(ink), back: hex(back), contrast: contrast(rgb(ink), rgb(back)), visible: visible / inked, vanishes };
 }
+
+export interface Corners {
+  corners: number; // how many of the image's four corners show, 0 to 4
+  ink: string; // the colour that shows
+  back: string; // what is behind it
+}
+
+// An image's own square corners, judged from the same three screenshots. Only
+// an opaque square counts: nearly all of its outer edge belongs to the image
+// (it changes when inverted), so a logo on a transparent background, or a
+// rounded image, never does, however far its mark reaches. Its corners show
+// when the square's edge stands out from what is behind it, or when the
+// pixels right at a corner do (a dark icon on a dark circle, with pale corners).
+export function cornersIn(shown: Raster, behind: Raster, inverted: Raster, area: Area): Corners {
+  const { width, height, channels } = shown;
+  const x0 = Math.round(area.x);
+  const y0 = Math.round(area.y);
+  const x1 = Math.round(area.x + area.width) - 1;
+  const y1 = Math.round(area.y + area.height) - 1;
+  const none = { corners: 0, ink: "", back: "" };
+  if (x1 - x0 < 6 || y1 - y0 < 6) return none;
+  const read = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return null;
+    const at = (y * width + x) * channels;
+    const px = [shown.data[at]!, shown.data[at + 1]!, shown.data[at + 2]!];
+    const ink = px[0] !== inverted.data[at] || px[1] !== inverted.data[at + 1] || px[2] !== inverted.data[at + 2];
+    const back = [behind.data[at]!, behind.data[at + 1]!, behind.data[at + 2]!];
+    return { px, ink, back, stands: ink && contrast(px, back) >= FAINT };
+  };
+  const rgb = (c: number[]) => hex((c[0]! << 16) | (c[1]! << 8) | c[2]!);
+
+  // The edge one pixel in, leaving out two pixels at each end for the corners.
+  const edge = [];
+  for (let x = x0 + 3; x <= x1 - 3; x++) edge.push(read(x, y0 + 1), read(x, y1 - 1));
+  for (let y = y0 + 3; y <= y1 - 3; y++) edge.push(read(x0 + 1, y), read(x1 - 1, y));
+  const seen = edge.filter((p) => p !== null);
+  if (!seen.length || seen.filter((p) => p.ink).length < seen.length * 0.85) return none;
+  const standing = seen.filter((p) => p.stands);
+  if (standing.length >= seen.length * 0.5) return { corners: 4, ink: rgb(standing[0]!.px), back: rgb(standing[0]!.back) };
+
+  let corners = 0;
+  let first: Omit<Corners, "corners"> | undefined;
+  for (const [cx, cy, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]] as const) {
+    const patch = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([ox, oy]) => read(cx + dx * ox!, cy + dy * oy!)).filter((p) => p?.stands);
+    if (!patch.length) continue;
+    corners++;
+    first ??= { ink: rgb(patch[0]!.px), back: rgb(patch[0]!.back) };
+  }
+  return { corners, ink: first?.ink ?? "", back: first?.back ?? "" };
+}

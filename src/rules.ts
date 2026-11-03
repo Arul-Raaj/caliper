@@ -913,6 +913,39 @@ computePosition(trigger, tooltip, {
       },
     ],
   },
+  "media/square-in-round": {
+    id: "media/square-in-round",
+    title: "A square image shows its corners inside a round shape",
+    severity: "medium",
+    why: "The image is smaller than the circle or pill around it, and its own corners are opaque, so a square sits inside the curve. It usually happens when a full square app icon is shrunk into an avatar or logo circle. An image doesn't have to fill its box: a logo with a transparent background, or a photo kept at its aspect ratio in a square box, is fine. Only an opaque square inside a round box is reported.",
+    fixes: [
+      {
+        title: "Let the image fill the shape",
+        when: "For full square app icons and photos: the shape crops the corners.",
+        css: `.avatar {
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}`,
+      },
+      {
+        title: "Round the image itself",
+        when: "When it has to stay smaller than its box.",
+        css: `.avatar img {
+  border-radius: 9999px;
+}`,
+      },
+      {
+        title: "Use a version with a transparent background",
+        when: "For logos and marks that should sit inside the shape with room around them.",
+        css: `<img src="logo-mark.svg" alt="">`,
+      },
+    ],
+  },
 } as const satisfies Record<string, Rule>;
 
 export type RuleId = keyof typeof RULES;

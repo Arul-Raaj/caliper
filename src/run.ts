@@ -9,7 +9,7 @@ import { loadScript } from "./scripts.js";
 import { launchBrowser } from "./browser.js";
 import { inPage } from "./page.js";
 import { exercise, pattern, type Seen } from "./interact.js";
-import { decodePng, inkIn } from "./pixels.js";
+import { cornersIn, decodePng, inkIn } from "./pixels.js";
 import type { ScriptedState } from "./steps.js";
 
 // ---------- types ----------
@@ -17,7 +17,7 @@ import type { ScriptedState } from "./steps.js";
 interface Box { x: number; y: number; width: number; height: number }
 
 interface RawFinding {
-  kind: "page-overflow" | "spill-x" | "clip-x" | "flex-shrink" | "grid-blowout" | "fixed-height" | "img-distorted" | "tap-small" | "label-wrap" | "label-truncated" | "fixed-offscreen" | "bar-over-content" | "control-past" | "hover-hug" | "overlay-offscreen-x" | "no-focus-ring" | "word-broken" | "invisible-media";
+  kind: "page-overflow" | "spill-x" | "clip-x" | "flex-shrink" | "grid-blowout" | "fixed-height" | "img-distorted" | "tap-small" | "label-wrap" | "label-truncated" | "fixed-offscreen" | "bar-over-content" | "control-past" | "hover-hug" | "overlay-offscreen-x" | "no-focus-ring" | "word-broken" | "invisible-media" | "square-in-round";
   selector: string;
   label: string;
   role: Role;
@@ -25,7 +25,7 @@ interface RawFinding {
   details: Record<string, number | string | boolean>;
 }
 
-type RawMedia = Pick<RawFinding, "selector" | "label" | "role" | "box">;
+type RawMedia = Pick<RawFinding, "selector" | "label" | "role" | "box"> & { round?: { box: Box; radius: number } };
 
 interface RawImage { src: string; selector: string; label: string; width: number; height: number; box: Box; visible: boolean; around: { width: number; height: number; next: number } }
 
@@ -120,6 +120,7 @@ function toRule(raw: RawFinding, scenario: Scenario): RuleId {
     case "no-focus-ring": return "focus/no-visible-ring";
     case "word-broken": return "text/word-broken";
     case "invisible-media": return "media/invisible-on-background";
+    case "square-in-round": return "media/square-in-round";
     case "clip-x": return "content/clip";
     case "spill-x":
       return scenario.stress === "long-word" || Number(d.longestWord) > 30 ? "content/long-word" : "content/spill";
@@ -171,6 +172,8 @@ function evidence(raw: RawFinding, scenario: Scenario): string {
       return `"${d.word}" breaks into "${d.head}" and "${d.tail}". The word needs ${d.wordWidth} px; the box gives ${d.room} px.`;
     case "invisible-media":
       return `It is ${d.ink} on ${d.back}, a contrast of ${d.contrast}:1. ${d.visible}% of its pixels stand out from what is behind them.`;
+    case "square-in-round":
+      return `It is ${d.width} × ${d.height} px inside a ${d.boxWidth} × ${d.boxHeight} px box with ${d.radius} px corners, and ${d.corners} of its own square corners show: ${d.ink} on ${d.back}.`;
   }
 }
 
@@ -473,9 +476,16 @@ export async function run(options: RunOptions): Promise<RunResult> {
         const inverted = await picture("invert");
         const found: RawFinding[] = [];
         for (const item of list) {
+          if (item.round) {
+            const seen = cornersIn(shown, behind, inverted, item.box);
+            if (seen.corners >= 2) {
+              const { round, ...rest } = item;
+              found.push({ ...rest, kind: "square-in-round", details: { width: Math.round(item.box.width), height: Math.round(item.box.height), boxWidth: Math.round(round.box.width), boxHeight: Math.round(round.box.height), radius: round.radius, corners: seen.corners, ink: seen.ink, back: seen.back } });
+            }
+          }
           const ink = inkIn(shown, behind, inverted, item.box);
           if (!ink?.vanishes) continue;
-          found.push({ ...item, kind: "invisible-media", details: { ink: ink.ink, back: ink.back, contrast: ink.contrast.toFixed(2), visible: Math.round(ink.visible * 100) } });
+          found.push({ selector: item.selector, label: item.label, role: item.role, box: item.box, kind: "invisible-media", details: { ink: ink.ink, back: ink.back, contrast: ink.contrast.toFixed(2), visible: Math.round(ink.visible * 100) } });
         }
         return found.slice(0, 25);
       } catch {
