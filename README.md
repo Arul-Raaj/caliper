@@ -23,7 +23,7 @@ Caliper runs the page as is, then pushes it eight ways: text three times longer,
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Arul-Raaj/caliper/main/docs/stress-dark.png">
-  <img src="https://raw.githubusercontent.com/Arul-Raaj/caliper/main/docs/stress.png" alt="Eight hand-drawn tiles, one per stress test: a line of text running out of its card, a long word escaping its box, a cracked image, a phone, a magnifier at 200% zoom, the word spacing set loose, a tablet with a grid of cards, and a crescent moon for dark mode." width="720">
+  <img src="https://raw.githubusercontent.com/Arul-Raaj/caliper/main/docs/stress.png" alt="The same card pushed eight ways: its title runs out of the card, a long word escapes it, its picture cracks, it squeezes into a phone, it doubles in size and runs off the window, its text spreads until the button drops out, it sits in a tablet grid, and it turns dark." width="720">
 </picture>
 
 It also opens menus and sheets, hovers rows and presses Tab, so what only appears after a click gets measured too.
