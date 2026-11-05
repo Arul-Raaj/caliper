@@ -1,0 +1,14 @@
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: #1d1d1f; background: #f6f6f4; }
+header.top { background: #fff; border-bottom: 1px solid #ddd; padding: 12px 24px; display: flex; gap: 16px; align-items: center; }
+header.top a { color: #1d1d1f; text-decoration: none; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+.card { background: #fff; border: 1px solid #e2e2e2; border-radius: 10px; padding: 16px; }
+.card h3 { margin: 8px 0 4px; font-size: 18px; }
+.card p { margin: 0; color: #555; }
+.thumb { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 6px; background: #ddd; object-fit: cover; }
+.btn { display: inline-block; padding: 8px 14px; border-radius: 6px; background: #1d4ed8; color: #fff; text-decoration: none; }
+h1 { font-size: 28px; margin: 0 0 16px; }
+header.top { flex-wrap: wrap; }
+header.top > * { min-width: 0; }
+header.top, h1, h2, h3, .btn, .card p { overflow-wrap: anywhere; }

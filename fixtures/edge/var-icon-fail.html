@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#1d1d1f;background:#f6f6f4}
+main{max-width:720px;margin:0 auto;padding:24px 16px}
+h1{font-size:22px;margin:0 0 16px}
+button{font:inherit}
+
+:root{--surface:#fff;--icon:#222}
+@media (prefers-color-scheme:dark){:root{--surface:#111}body{background:#000;color:#eee}}
+.tools{display:flex;gap:8px;padding:10px;background:var(--surface);border-radius:10px}
+.tools button{display:grid;place-items:center;width:40px;height:40px;border:0;background:transparent;border-radius:8px}
+.tools svg{width:22px;height:22px;fill:var(--icon-color)}
+
+</style></head><body>
+<main><h1>Editor</h1><div class="tools"><button type="button" aria-label="Align"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z"/></svg></button><button type="button" aria-label="Indent"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z"/></svg></button><button type="button" aria-label="Justify"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z"/></svg></button></div></main></body></html>

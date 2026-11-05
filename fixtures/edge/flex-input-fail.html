@@ -1,0 +1,36 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #1d232b; background: #f6f7f9; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 24px; margin: 0 0 16px; }
+  h2, h3, p { margin: 0; }
+  button, input { font: inherit; }
+</style>
+<title>Signup form</title>
+<style>
+  .attach { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; max-width: 520px; }
+  .attach__title { font-size: 15px; font-weight: 600; overflow-wrap: break-word; }
+  .attach__icon { flex: none; width: 36px; height: 36px; display: grid; place-items: center; background: #eef2f6; border-radius: 8px; }
+  .files { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .file { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid #e3e6ea; }
+  .file:first-child { border-top: 0; }
+  .file__main { flex: 1; }
+  .file__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file__meta { flex: none; color: #55606c; font-size: 14px; }
+  .signup { padding: 20px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .signup p { color: #55606c; margin-bottom: 12px; }
+  .signup__row { display: flex; gap: 8px; }
+  .signup input { flex: 1; padding: 10px 12px; border: 1px solid #c8ced6; border-radius: 8px; }
+  .signup button { flex: none; padding: 10px 16px; border: 0; border-radius: 8px; background: #1f4f8b; color: #fff; }
+  .inbox { height: 360px; display: flex; flex-direction: column; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .inbox__head { padding: 12px 16px; border-bottom: 1px solid #e3e6ea; font-weight: 600; }
+  .inbox__body { flex: 1; display: flex; flex-direction: column; }
+  .inbox__list { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 0; }
+  .inbox__list li { padding: 10px 16px; border-bottom: 1px solid #eef0f3; }
+  .inbox__foot { padding: 10px 16px; border-top: 1px solid #e3e6ea; color: #55606c; font-size: 14px; }
+  
+</style></head><body><main>
+<h1>Newsletter</h1>
+<form class="signup" onsubmit="return false"><h3>Get the monthly digest</h3><p>One email a month. No tracking pixels.</p><div class="signup__row"><input type="email" aria-label="Email" placeholder="you@company.com" size="28"><button>Subscribe</button></div></form>
+</main></body></html>

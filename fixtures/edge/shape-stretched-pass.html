@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #1d232b; background: #f6f7f9; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 24px; margin: 0 0 16px; }
+  h2, h3 { margin: 0; }
+  p { margin: 0; }
+  button { font: inherit; }
+</style>
+<title>Media rows aligned to start</title>
+<style>
+  .person { display: flex; gap: 16px; padding: 16px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .person__avatar { width: 72px; border-radius: 50%; }
+  .person__content p { color: #55606c; }
+  .cart { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .line { display: flex; gap: 12px; padding: 12px; border-top: 1px solid #e3e6ea; }
+  .line:first-child { border-top: 0; }
+  .line__thumb { width: 80px; border-radius: 8px; }
+  .line__info { flex: 1; display: flex; flex-direction: column; }
+  .line__info span { color: #55606c; font-size: 14px; }
+  .comments { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .comment { display: flex; gap: 12px; }
+  .comment p { color: #3c4652; }
+  .avatar { width: 40px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #dbe7f5; color: #1f4f8b; font-weight: 600; font-size: 14px; }
+  .features { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+  .feature { display: flex; gap: 16px; }
+  .feature h3 { font-size: 16px; }
+  .feature p { color: #55606c; }
+  .feature__icon { width: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: #e3f4ea; color: #1b7a43; }
+  .person__avatar, .line__thumb, .avatar, .feature__icon { align-self: flex-start; }
+  .avatar { height: 40px; } .feature__icon { height: 44px; }
+</style></head><body><main>
+<h1>About the author</h1>
+<div class="person">
+  <img class="person__avatar" src="img/avatar.svg" alt="">
+  <div class="person__content">
+    <h3>Ahmed Karim</h3>
+    <p>Staff engineer on the payments team. Writes about queues and retries.</p>
+  </div>
+</div>
+<h1 style="margin-top:24px">Your cart</h1>
+<ul class="cart">
+  <li class="line"><img class="line__thumb" src="img/product.svg" alt=""><div class="line__info"><b>Insulated bottle</b><span>750 ml, Slate</span><span>Qty 1</span></div><b class="line__price">₹1,299</b></li>
+  <li class="line"><img class="line__thumb" src="img/product.svg" alt=""><div class="line__info"><b>Travel mug</b><span>350 ml, Sand</span><span>Qty 2</span></div><b class="line__price">₹1,798</b></li>
+</ul>
+<h1 style="margin-top:24px">Activity</h1>
+<ul class="comments">
+  <li class="comment"><span class="avatar" aria-hidden="true">MS</span><div><b>Maya Singh</b><p>Shipped the fix for the login loop.</p></div></li>
+  <li class="comment"><span class="avatar" aria-hidden="true">JL</span><div><b>Jonas Lind</b><p>Confirmed on staging, thanks.</p></div></li>
+</ul>
+<h1 style="margin-top:24px">What you get</h1>
+<ul class="features">
+  <li class="feature"><span class="feature__icon"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><div><h3>Automatic backups</h3><p>Every night, kept for 30 days.</p></div></li>
+  <li class="feature"><span class="feature__icon"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10" fill="none" stroke="currentColor" stroke-width="2"/></svg></span><div><h3>Audit log</h3><p>See who changed what, and when.</p></div></li>
+</ul>
+</main></body></html>

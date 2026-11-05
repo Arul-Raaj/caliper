@@ -1,0 +1,35 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #1d232b; background: #f6f7f9; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 24px; margin: 0 0 16px; }
+  h2, h3, p { margin: 0; }
+  button { font: inherit; }
+</style>
+<title>Settings rows</title>
+<style>
+  .section__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .section__title { flex: 1; min-width: 0; font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .section__more { color: #1f4f8b; font-weight: 500; text-decoration: none; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .tiles div { height: 80px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .card { position: relative; padding: 16px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; max-width: 360px; }
+  .card h3 { font-size: 16px; }
+  .card p { color: #55606c; margin-top: 4px; }
+  .card__menu { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #55606c; cursor: pointer; }
+  .settings { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .setting { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid #e3e6ea; }
+  .setting:first-child { border-top: 0; }
+  .switch { flex: none; width: 44px; height: 24px; padding: 0; border: 0; border-radius: 12px; background: #1f4f8b; position: relative; }
+  .switch::after { content: ""; position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+  .switch[aria-checked=false] { background: #c8ced6; }
+  .switch[aria-checked=false]::after { right: auto; left: 3px; }
+  .products { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-width: 420px; }
+  .product { display: flex; justify-content: space-between; padding: 12px 16px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .product__price { font-weight: 600; }
+  
+</style></head><body><main>
+<h1>Notifications</h1>
+<ul class="settings"><li class="setting"><span id="l1">Show my status to teammates</span><button class="switch" role="switch" aria-checked="true" aria-labelledby="l1"></button></li><li class="setting"><span id="l2">Share usage data to improve search</span><button class="switch" role="switch" aria-checked="false" aria-labelledby="l2"></button></li></ul>
+</main></body></html>

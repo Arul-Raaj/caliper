@@ -6,7 +6,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../fixtures/", import.meta.url));
-const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".svg": "image/svg+xml" };
+const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".css": "text/css" };
 
 export function serve(): Promise<{ server: Server; url: string }> {
   const server = createServer(async (req, res) => {

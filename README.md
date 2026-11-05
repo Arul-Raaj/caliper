@@ -19,7 +19,7 @@ It works on anything with a URL: a live site, a preview deploy, or `http://local
 
 ## What it does
 
-Caliper runs the page as is, then pushes it eight ways: text three times longer, a 63-letter word, broken images, a 320 px phone, 200% zoom, WCAG text spacing, a 768 px tablet and dark mode.
+Caliper runs the page as is, then pushes it eleven ways: text three times longer (on a desktop and on a phone), short button labels, a 63-letter word, broken images, a 320 px phone, a phone held sideways, 200% zoom, WCAG text spacing, a 768 px tablet and dark mode.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Arul-Raaj/caliper/main/docs/stress-dark.png">
@@ -28,7 +28,9 @@ Caliper runs the page as is, then pushes it eight ways: text three times longer,
 
 It also opens menus and sheets, hovers rows and presses Tab, so what only appears after a click gets measured too.
 
-It measures every element and reports sideways scrolling, text that spills or gets cut off, flex and grid items that won't shrink, fixed heights, stretched or missing images, small tap targets, button labels that wrap or truncate, and fixed panels that run off screen. It also catches the defects AI-built UI tends to ship with: scrollbars over content, controls pushed out of their container, hover fills that hug their content, tooltips off the side of the screen, no visible focus ring, words split mid-way, and images that vanish into their background.
+It measures every element and reports sideways scrolling, text that spills or gets cut off, flex and grid items that won't shrink, fixed heights and widths, stretched or missing images, small tap targets, button labels that wrap or truncate, and fixed panels that run off screen. It also catches the defects AI-built UI tends to ship with: scrollbars over content, controls pushed out of their container, hover fills that hug their content, tooltips off the side of the screen, no visible focus ring, words split mid-way, and images that vanish into their background.
+
+And the quieter ones that only show with real content or a real device: text that runs into the button beside it, avatars stretched into pills, sticky sidebars that never stick, pinned bars that cover a short screen or the page's first heading, images wider than their box, backgrounds that tile by accident, image edges that melt into the page, text that can't be read when its photo fails, hover styles that stick after a tap, fields that zoom the page on iPhone, panels that scroll the page behind them, CSS variables with no value, and rules dropped by one vendor selector.
 
 Each issue gets a fix chosen for the element: a title clamps at two lines, a button label never truncates, a price never breaks. Two alternatives and a "Copy prompt" button for your AI assistant sit beside it. Caliper itself uses no AI, so the same page gives the same report every time.
 

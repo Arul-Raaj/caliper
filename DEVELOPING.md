@@ -4,22 +4,25 @@ Notes for working on Caliper itself. The public README (shipped to npm) is `READ
 
 ## What it does
 
-Each run loads the page in 9 scenarios, 3 at a time, plus one per `--width`:
+Each run loads the page in 12 scenarios, 3 at a time, plus one per `--width`:
 
 | Scenario | What changes |
 | --- | --- |
 | As is, 1280 px | Nothing. Anything found here is already broken |
 | Text 3x longer | Every short piece of text is tripled (names, titles, labels) |
+| Text 3x longer on a phone | The same, on a 320 px phone, where long content breaks first |
+| Short button labels | Button labels of 3 to 20 letters become "OK", like a short translation |
 | 63-letter word added | A long word with no spaces is added to short text, like a URL or a German noun |
 | Images fail to load | Every image request is blocked |
-| 320 px phone | A small phone screen with touch |
+| 320 px phone | A small phone screen with touch: hover styles are forced on as a tap leaves them, and text fields are focused |
+| Phone held sideways | 844 × 390, where pinned bars and tall sticky panels run out of room |
 | 200% browser zoom | Exactly what a 1280 px window shows at 200% zoom |
 | WCAG text spacing | Line height 1.5, paragraph spacing 2x, letter spacing 0.12em, word spacing 0.16em (WCAG 1.4.12) |
 | 768 px tablet | The width where navs and grids fall between breakpoints |
 | Dark mode | `prefers-color-scheme: dark`, for logos and icons drawn for one theme |
 | `--width <px>` | A desktop window that wide with classic scrollbars, for side panels |
 
-In each one it measures every element and checks 20 rules:
+In each one it measures every element and checks 40 rules:
 
 | Rule | What it catches |
 | --- | --- |
@@ -43,6 +46,26 @@ In each one it measures every element and checks 20 rules:
 | `focus/no-visible-ring` | Tab reaches a control and nothing about it changes (WCAG 2.4.7) |
 | `text/word-broken` | An ordinary word splits across two lines, like "Requir / ed" |
 | `media/invisible-on-background` | An image or icon has almost no contrast with what is behind it |
+| `layout/fixed-width` | An item holds a set width and won't shrink, so its row can't fit a small screen |
+| `layout/stretched-shape` | A row stretches a square or round shape (an avatar, an icon tile) into a pill |
+| `layout/sticky-no-room` | A sticky element is as tall as its container, so it never sticks |
+| `layout/pinned-cover` | Pinned bars cover more than 40% of a short screen |
+| `layout/covered-by-pinned` | A fixed or sticky bar covers the first or last content on the page |
+| `layout/text-touches-control` | Text runs into a control, a price or a badge beside it, or under a control laid over it |
+| `layout/uneven-row-spacing` | A wrapped `space-between` row leaves its last line spread to the edges |
+| `layout/auto-fit-stretch` | An `auto-fit` grid stretches a few items across its empty columns |
+| `media/wider-than-box` | An image, video or canvas is wider than its box, with no `max-width: 100%` |
+| `media/bg-tiles` | A background image repeats by accident, or will on a wider screen |
+| `media/edge-lost` | An image's outline melts into the background, like a white avatar on a white page |
+| `content/unreadable-without-image` | Text over an image fails contrast when the image doesn't load |
+| `input/short-button` | A button with a short label shrinks narrower than 44 px, or than it is tall |
+| `input/focus-zoom` | A text field under 16 px zooms the page on iPhone when it takes focus |
+| `scroll/empty-bar` | `overflow: scroll` shows a bar with nothing to scroll |
+| `scroll/gutter-shift` | Content moves sideways when a scrollbar appears |
+| `scroll/chains-to-page` | Scrolling past the end of an overlay scrolls the page behind it |
+| `hover/sticks-on-touch` | A hover style that lifts, fills or reveals stays on after a tap |
+| `css/var-unresolved` | A `var()` with no fallback points at a variable that isn't set |
+| `css/dropped-rule` | One vendor selector in a list makes the browser drop the whole rule |
 
 Copies of the same component (list items, cards) share one card in the report, with the other copies listed under it.
 
@@ -74,6 +97,18 @@ Waits are bounded: 1 s after opening, 300 ms after a hover or Tab, so a page tha
 Caliper's browser draws classic 15 px scrollbars everywhere (`--disable-features=OverlayScrollbar`). Removing `--hide-scrollbars` isn't enough on a Mac, where overlay bars take no room and don't show in screenshots. So `scroll/bar-over-content` measures from where the bar starts: content flush against a classic bar is the content an overlay bar lands on. Under 4 px counts as touching the bar: anything wider is clear space, and the rule's own fixes leave at least that. Text and icons count wherever the row has scrolled to, so a row below the fold is judged like a visible one. A control's full box counts only if you can see it, so a padded transparent row stops at its text. A bar that takes no room was hidden on purpose, so it is skipped. Phones are skipped too, because their bars fade. Controls inside a carousel keep their own overflow and don't count.
 
 `text/word-broken` only reads text under `overflow-wrap: anywhere` or `break-word`, or `word-break`, since nothing else breaks a word. It skips text the stress test rewrote, the whole 63-letter scenario, `hyphens: auto`, URLs and codes, words over 30 letters and text clipped to nothing such as a skip link.
+
+Some fixes are built from what was measured, not picked by role (`src/fixes.ts`): a row that wraps when tested gets "Let the row wrap" first; fixed grid columns get a breakpoint at their width plus 240 px; a bar covering content gets padding of its own height. These are marked high confidence, because they were tested in the page.
+
+The stylesheet checks read same-origin rules, inside `@media` that matches, `@supports` the browser supports, `@layer` and nesting. Rules inside `@container` are left out, because which elements a container query reaches can't be read from there. `css/var-unresolved` counts a `var()` with no fallback only on an element where the variable computes to nothing; `css/dropped-rule` tests each selector of a list with `CSS.supports`.
+
+Touch: Chromium's developer tools force `:hover` and `:focus` on an element, so the phone scenario sees a tap's sticky hover without tapping a link. A hover rule that only changes colour isn't reported. A text field's size is read with focus, and pages that turn zoom off (`maximum-scale=1`) are skipped.
+
+`media/edge-lost` uses the same three screenshots as `media/invisible-on-background`. An image pixel is on the outline when a pixel two steps away isn't the image; it is lost when it has under 1.1:1 contrast and no more than 24 levels of difference in any channel with the pixel outside, so a yellow photo on a pale grey page keeps its edge. A ring, outline or shadow counts as an edge. Images under 24 px are skipped.
+
+`content/unreadable-without-image` runs when images are blocked: text sitting on an image or a background photo is hidden for one screenshot, and its colour is checked against what is behind it.
+
+`scroll/chains-to-page` wheels to the end of each overlay that scrolls (a dialog, a drawer, a menu) and once more: if the page moves, the overlay passes its scrolling on. It is tested again with `overscroll-behavior: contain` to confirm the fix.
 
 Mobile scenarios add a viewport tag to a page that has none. Without it Chromium lays the page out 980 px wide, so the "320 px phone" would quietly measure a desktop layout. Pages meant for desktop, such as an extension's side panel, usually have none. The report notes it, because a real phone would use 980 px.
 
@@ -113,9 +148,10 @@ src/run.ts         opens each scenario, stresses, measures, takes screenshots
 src/page.ts        runs the browser scripts in an isolated world
 src/interact.ts    opens menus and sheets, runs scripted states, hovers and tabs
 src/steps.ts       reads and runs a --steps file
-src/pixels.ts      reads screenshots and finds images that vanish
-src/scenarios.ts   the 9 scenarios, and the --width one
-src/rules.ts       the 20 rules, and the fixes by element role (recommended first)
+src/pixels.ts      reads screenshots: images that vanish, edges that melt, text colours
+src/scenarios.ts   the 12 scenarios, and the --width one
+src/rules.ts       the 40 rules, and the fixes by element role (recommended first)
+src/fixes.ts       fixes built from what was measured (a breakpoint, a bar's height)
 src/prompt.ts      the prompt the report copies
 src/report.ts      writes index.html and report.json
 browser/stress.js  runs inside the page: lengthens text, applies text spacing

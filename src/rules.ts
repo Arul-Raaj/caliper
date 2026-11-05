@@ -11,7 +11,7 @@ export interface Fix {
   css: string;
 }
 
-type Fixes = readonly [Fix, Fix, Fix];
+export type Fixes = readonly [Fix, Fix, Fix];
 
 export interface Rule {
   id: string;
@@ -240,10 +240,14 @@ export interface Recommendation {
   basis: string; // one line: why this fix is first
 }
 
-// Pick the fixes for one finding. Text rules recommend by what the element
+// Pick the fixes for one finding. Fixes built from the finding's own
+// measurements come first; then text rules recommend by what the element
 // is; the rest use the rule's own fixes.
-export function recommend(rule: Rule, role: Role = "box"): Recommendation {
-  const byRole = rule.roles ? BY_ROLE[role] : undefined;
+export function recommend(rule: Rule, role: Role = "box", measured?: Fixes): Recommendation {
+  if (measured) return { fixes: measured, confidence: "high", basis: "Picked from what Caliper measured and tested on this element." };
+  let byRole = rule.roles ? BY_ROLE[role] : undefined;
+  // A row that won't fit can always wrap: keep that option whatever the item is.
+  if (byRole && rule.id === "layout/flex-min-size" && !byRole.some((f) => /flex-wrap: wrap/.test(f.css))) byRole = [byRole[0], byRole[1], rule.fixes[1]];
   if (byRole) {
     const sure = role !== "title";
     return {
@@ -909,6 +913,678 @@ computePosition(trigger, tooltip, {
   padding: 8px;
   background: var(--plate);
   border-radius: 8px;
+}`,
+      },
+    ],
+  },
+  "layout/fixed-width": {
+    id: "layout/fixed-width",
+    title: "A fixed width won't fit a small screen",
+    severity: "medium",
+    why: "The element has a set width and won't shrink (flex: none or flex-shrink: 0), so on a narrow screen its row runs past the edge instead of giving way.",
+    fixes: [
+      {
+        title: "Cap the width",
+        when: "Best for most cases: it keeps its width where there is room and shrinks where there isn't.",
+        css: `.element {
+  flex: 0 1 280px; /* the old width, now allowed to shrink */
+  min-width: 0;
+}`,
+      },
+      {
+        title: "Stack it on small screens",
+        when: "For sidebars and filters beside a main column.",
+        css: `@media (max-width: 640px) {
+  .row {
+    flex-direction: column;
+  }
+  .element {
+    width: auto;
+  }
+}`,
+      },
+      {
+        title: "Use a fluid width",
+        when: "When it should follow the screen's width.",
+        css: `.element {
+  width: min(280px, 100%);
+}`,
+      },
+    ],
+  },
+  "layout/stretched-shape": {
+    id: "layout/stretched-shape",
+    title: "A row stretches a shape out of its proportions",
+    severity: "medium",
+    why: "Flex and grid rows stretch their items to the row's height by default (align-items: stretch). A round avatar or a square icon tile with no set height grows with its neighbour, so the circle turns into a pill.",
+    fixes: [
+      {
+        title: "Stop the row stretching it",
+        when: "Best for most cases: it keeps its own size, top-aligned.",
+        css: `.shape {
+  align-self: flex-start;
+}`,
+      },
+      {
+        title: "Fix its shape",
+        when: "When it must stay square whatever happens around it.",
+        css: `.shape {
+  aspect-ratio: 1;
+  height: auto;
+  align-self: flex-start;
+}`,
+      },
+      {
+        title: "Centre the row's items",
+        when: "When everything in the row should line up on its middle.",
+        css: `.row {
+  align-items: center;
+}`,
+      },
+    ],
+  },
+  "layout/sticky-no-room": {
+    id: "layout/sticky-no-room",
+    title: "A sticky element has no room to stick",
+    severity: "medium",
+    why: "A sticky element only moves inside its parent. A grid or flex row stretches it to the parent's full height, so there is nowhere to move: the table of contents or buy box just scrolls away.",
+    fixes: [
+      {
+        title: "Align it to the start",
+        when: "Best for most cases: it keeps its own height and sticks.",
+        css: `.sticky {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+}`,
+      },
+      {
+        title: "Align the whole row to the start",
+        when: "When no item in the row needs to stretch.",
+        css: `.layout {
+  align-items: start;
+}`,
+      },
+      {
+        title: "Wrap the content and stick the wrapper",
+        when: "When the column itself must stretch, for a background or a border.",
+        css: `.sidebar > .sticky-inner {
+  position: sticky;
+  top: 16px;
+}`,
+      },
+    ],
+  },
+  "layout/pinned-cover": {
+    id: "layout/pinned-cover",
+    title: "Pinned bars cover most of a short screen",
+    severity: "high",
+    why: "Fixed and sticky bars keep their height whatever the screen's. On a phone held sideways or at 200% zoom they cover so much that the page shows through a narrow slot (WCAG 1.4.10).",
+    fixes: [
+      {
+        title: "Pin bars only on tall screens",
+        when: "Best for most cases: the bars scroll away with the page when height is short.",
+        css: `.bar {
+  position: static;
+}
+@media (min-height: 600px) {
+  .bar {
+    position: sticky;
+    top: 0;
+  }
+}`,
+      },
+      {
+        title: "Hide the bar while scrolling down",
+        when: "For a header that must stay close: it slides away and comes back on scroll up.",
+        css: `.bar {
+  position: sticky;
+  top: 0;
+  transition: translate 250ms;
+}
+.bar[data-hidden] {
+  translate: 0 -100%;
+}`,
+      },
+      {
+        title: "Make the bars shorter",
+        when: "When the bars must stay pinned: trim padding and secondary rows on short screens.",
+        css: `@media (max-height: 500px) {
+  .bar {
+    padding-block: 4px;
+  }
+  .bar .secondary {
+    display: none;
+  }
+}`,
+      },
+    ],
+  },
+  "layout/covered-by-pinned": {
+    id: "layout/covered-by-pinned",
+    title: "A pinned bar covers content",
+    severity: "high",
+    why: "A fixed or sticky bar is laid over the page, and nothing makes room for it. The content under it sits at the top (or the end) of the page, so scrolling never brings it out: a heading, a link or the first line of text is simply never seen.",
+    fixes: [
+      {
+        title: "Make room for the bar",
+        when: "Best for most cases: the page starts below the bar.",
+        css: `main {
+  padding-top: 64px; /* the bar's height */
+}`,
+      },
+      {
+        title: "Give the variable a fallback",
+        when: "When the room comes from a variable a script sets.",
+        css: `main {
+  padding-top: var(--header-height, 64px);
+}`,
+      },
+      {
+        title: "Use sticky, not fixed",
+        when: "When the bar can take its own place in the page.",
+        css: `.bar {
+  position: sticky;
+  top: 0;
+}`,
+      },
+    ],
+  },
+  "layout/text-touches-control": {
+    id: "layout/text-touches-control",
+    title: "Text runs into the control beside it",
+    severity: "medium",
+    why: "The row sets no gap between a piece of text and the button, toggle or price next to it. Short text looks fine; a longer name or a narrower screen pushes the text right up against it, or under it.",
+    fixes: [
+      {
+        title: "Set a gap on the row",
+        when: "Best for most cases: the text wraps before it reaches its neighbour.",
+        css: `.row {
+  display: flex;
+  column-gap: 16px;
+}
+.row > .text {
+  min-width: 0;
+}`,
+      },
+      {
+        title: "Keep room for a control laid over it",
+        when: "For a menu or close button placed in a card's corner.",
+        css: `.card__title {
+  padding-inline-end: 40px; /* the button's width plus 8 px */
+}`,
+      },
+      {
+        title: "Truncate the text",
+        when: "For one-line rows like list items and settings.",
+        css: `.row > .text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}`,
+      },
+    ],
+  },
+  "layout/uneven-row-spacing": {
+    id: "layout/uneven-row-spacing",
+    title: "A wrapped row spaces its lines unevenly",
+    severity: "medium",
+    why: "justify-content: space-between spreads each line on its own. A full line looks right, but a short last line pins its two items to the far edges, with a wide hole between them.",
+    fixes: [
+      {
+        title: "Space with gap",
+        when: "Best for most cases: every line uses the same spacing.",
+        css: `.row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 16px;
+}`,
+      },
+      {
+        title: "Use a grid",
+        when: "For cards that should line up in columns.",
+        css: `.row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 16px;
+}`,
+      },
+      {
+        title: "Keep space-between for one line only",
+        when: "For a header that spreads its two ends on wide screens.",
+        css: `.row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+}`,
+      },
+    ],
+  },
+  "layout/auto-fit-stretch": {
+    id: "layout/auto-fit-stretch",
+    title: "A few items stretch across an auto-fit grid",
+    severity: "medium",
+    why: "repeat(auto-fit, …) collapses the columns it has no items for and hands their room to the items there are. With one search result or two team members, each card stretches across the row.",
+    fixes: [
+      {
+        title: "Use auto-fill",
+        when: "Best for most cases: empty columns keep their room and the cards keep their width.",
+        css: `.grid {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}`,
+      },
+      {
+        title: "Cap the item width",
+        when: "When auto-fit should still centre a short row.",
+        css: `.grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 320px));
+  justify-content: center;
+}`,
+      },
+      {
+        title: "Use a flex row with a set width",
+        when: "For a handful of cards that should keep one size.",
+        css: `.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.grid > * {
+  flex: 0 1 280px;
+}`,
+      },
+    ],
+  },
+  "media/wider-than-box": {
+    id: "media/wider-than-box",
+    title: "An image is wider than its box",
+    severity: "medium",
+    why: "An image with no max-width is as wide as its file. In a narrower column it runs past the edge, or a card with overflow: hidden crops it.",
+    fixes: [
+      {
+        title: "Cap images at their box",
+        when: "Best for most cases: images scale down and keep their shape.",
+        css: `img,
+video {
+  max-width: 100%;
+  height: auto;
+}`,
+      },
+      {
+        title: "Fill the box and crop",
+        when: "For thumbnails and covers with a set shape.",
+        css: `img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}`,
+      },
+      {
+        title: "Scroll inside a wrapper",
+        when: "For diagrams and screenshots people need at full size.",
+        css: `.figure {
+  max-width: 100%;
+  overflow-x: auto;
+}`,
+      },
+    ],
+  },
+  "media/bg-tiles": {
+    id: "media/bg-tiles",
+    title: "A background image repeats by accident",
+    severity: "medium",
+    why: "background-repeat defaults to repeat. A photo or a corner mark that doesn't cover its box shows a second copy beside or below it, often only on wide or tall screens.",
+    fixes: [
+      {
+        title: "Cover the box, once",
+        when: "Best for photos: one copy that fills the box.",
+        css: `.element {
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+}`,
+      },
+      {
+        title: "Turn off the repeat",
+        when: "For a mark or an illustration placed in a corner.",
+        css: `.element {
+  background-repeat: no-repeat;
+}`,
+      },
+      {
+        title: "Fill with a colour behind it",
+        when: "When the image keeps its size and the rest of the box shows a colour.",
+        css: `.element {
+  background: var(--surface) url("…") no-repeat center / contain;
+}`,
+      },
+    ],
+  },
+  "media/edge-lost": {
+    id: "media/edge-lost",
+    title: "An image's edge disappears into the background",
+    severity: "medium",
+    why: "The image's outer pixels are the same colour as what is around it, such as an avatar on a white background on a white page. Its content shows, but its shape doesn't.",
+    fixes: [
+      {
+        title: "Draw an inner ring",
+        when: "Best for most cases: a faint ring that follows the corners in either theme.",
+        css: `.avatar {
+  outline: 1px solid rgb(0 0 0 / 0.1);
+  outline-offset: -1px;
+}`,
+      },
+      {
+        title: "Ring it with a layer",
+        when: "When the ring must sit over the image, like a wrapper with an inset shadow.",
+        css: `.avatar-wrap {
+  position: relative;
+}
+.avatar-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1);
+}`,
+      },
+      {
+        title: "Put it on a plate",
+        when: "For logos and app icons: a tinted tile behind them.",
+        css: `.logo {
+  padding: 8px;
+  background: var(--plate);
+  border-radius: 12px;
+}`,
+      },
+    ],
+  },
+  "content/unreadable-without-image": {
+    id: "content/unreadable-without-image",
+    title: "Text over an image can't be read when the image fails",
+    severity: "high",
+    why: "Light text is placed on a photo and relies on it for contrast. When the image is slow, blocked or broken, the text sits on the plain background behind it, often white on white.",
+    fixes: [
+      {
+        title: "Give the image a background colour",
+        when: "Best for most cases: a dark colour shows until the image arrives, and if it never does.",
+        css: `.hero img,
+.hero {
+  background-color: #1f2328; /* close to the image's own tone */
+}`,
+      },
+      {
+        title: "Lay a scrim under the text",
+        when: "For captions on photos: readable on any image, and without one.",
+        css: `.caption {
+  background: linear-gradient(to top, rgb(0 0 0 / 0.7), transparent);
+}`,
+      },
+      {
+        title: "Shadow the text",
+        when: "For short headings over busy photos.",
+        css: `.overlay-text {
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+}`,
+      },
+    ],
+  },
+  "input/short-button": {
+    id: "input/short-button",
+    title: "A button with a short label is too narrow",
+    severity: "medium",
+    why: "The button is only as wide as its label. With \"OK\", \"Go\" or a short translation it shrinks to a small chip that is hard to hit and doesn't read as a button.",
+    fixes: [
+      {
+        title: "Give buttons a minimum width",
+        when: "Best for most cases: short labels keep a button's shape.",
+        css: `.button {
+  min-width: 80px;
+  padding-inline: 16px;
+}`,
+      },
+      {
+        title: "Make the action buttons equal",
+        when: "For a pair like Cancel and OK in a dialog.",
+        css: `.actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 8px;
+}`,
+      },
+      {
+        title: "Use a fuller label",
+        when: "When the label can say what happens, like \"Save changes\".",
+        css: `<button class="button">Save changes</button>`,
+      },
+    ],
+  },
+  "input/focus-zoom": {
+    id: "input/focus-zoom",
+    title: "A text field zooms the page on iPhone",
+    severity: "medium",
+    why: "iOS Safari zooms into any text field whose font is under 16 px when it takes focus, and leaves the page zoomed in after. People have to pinch back out before they can carry on.",
+    fixes: [
+      {
+        title: "Use 16 px or more in fields",
+        when: "Best for most cases: no zoom, and easier to read.",
+        css: `input,
+select,
+textarea {
+  font-size: max(16px, 1rem);
+}`,
+      },
+      {
+        title: "Only on touch screens",
+        when: "When the desktop design needs smaller fields.",
+        css: `@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}`,
+      },
+      {
+        title: "Scale the field, not the text",
+        when: "When the field must look smaller: draw it at 16 px and scale it down.",
+        css: `.compact-input {
+  font-size: 16px;
+  transform: scale(0.875);
+  transform-origin: left center;
+}`,
+      },
+    ],
+  },
+  "scroll/empty-bar": {
+    id: "scroll/empty-bar",
+    title: "A scrollbar shows with nothing to scroll",
+    severity: "medium",
+    why: "overflow: scroll draws a scrollbar whether the content needs one or not. On Windows, Linux and a Mac with a mouse it shows as an empty gutter.",
+    fixes: [
+      {
+        title: "Scroll only when needed",
+        when: "Best for most cases: the bar appears once the content is long enough.",
+        css: `.element {
+  overflow-y: auto;
+}`,
+      },
+      {
+        title: "Keep the room without the bar",
+        when: "When the layout must not shift once the bar appears.",
+        css: `.element {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}`,
+      },
+      {
+        title: "Use a thin bar",
+        when: "For tight panels that always scroll.",
+        css: `.element {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}`,
+      },
+    ],
+  },
+  "scroll/gutter-shift": {
+    id: "scroll/gutter-shift",
+    title: "Content jumps sideways when a scrollbar appears",
+    severity: "medium",
+    why: "overflow: auto takes room for the scrollbar only once the content is long enough to scroll. On screens with classic scrollbars, everything inside then moves sideways by the bar's width.",
+    fixes: [
+      {
+        title: "Reserve the scrollbar's room",
+        when: "Best for most cases: the room is kept whether the bar shows or not.",
+        css: `.scroller {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}`,
+      },
+      {
+        title: "Use a thin bar",
+        when: "When a full-width gutter is too much for a narrow panel.",
+        css: `.scroller {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}`,
+      },
+      {
+        title: "Always scroll",
+        when: "Only for panels that almost always overflow.",
+        css: `.scroller {
+  overflow-y: scroll;
+}`,
+      },
+    ],
+  },
+  "scroll/chains-to-page": {
+    id: "scroll/chains-to-page",
+    title: "Scrolling past the end of a panel scrolls the page behind it",
+    severity: "medium",
+    why: "A dialog, drawer or chat panel that scrolls passes the scroll on to the page once it reaches its end. The page behind the overlay moves, and people lose their place.",
+    fixes: [
+      {
+        title: "Contain the scroll",
+        when: "Best for most cases: the panel keeps its scrolling to itself.",
+        css: `.panel__body {
+  overscroll-behavior: contain;
+}`,
+      },
+      {
+        title: "Lock the page while it is open",
+        when: "For modal dialogs and full-height drawers.",
+        css: `body:has(dialog[open]) {
+  overflow: hidden;
+}`,
+      },
+      {
+        title: "Contain it on both axes",
+        when: "For panels that scroll both ways, like a chat with wide code blocks.",
+        css: `.panel__body {
+  overscroll-behavior: contain;
+  overflow: auto;
+}`,
+      },
+    ],
+  },
+  "hover/sticks-on-touch": {
+    id: "hover/sticks-on-touch",
+    title: "A hover style sticks after a tap",
+    severity: "medium",
+    why: "Touch screens apply :hover on tap and keep it until something else is tapped. A card stays lifted, a row stays filled, or actions meant for hover appear by accident.",
+    fixes: [
+      {
+        title: "Hover only where there is a mouse",
+        when: "Best for most cases: touch screens never see the hover style.",
+        css: `@media (hover: hover) {
+  .card:hover {
+    transform: translateY(-4px);
+  }
+}`,
+      },
+      {
+        title: "Show hover-only actions on touch",
+        when: "For actions that appear on hover: always show them when there is no hover.",
+        css: `@media (hover: none) {
+  .tile .actions {
+    opacity: 1;
+  }
+}`,
+      },
+      {
+        title: "Style the press instead",
+        when: "For feedback on tap: it shows while the finger is down and goes away.",
+        css: `.card:active {
+  transform: scale(0.98);
+}`,
+      },
+    ],
+  },
+  "css/var-unresolved": {
+    id: "css/var-unresolved",
+    title: "A CSS variable has no value and no fallback",
+    severity: "high",
+    why: "var(--name) with nothing set and no fallback makes the browser drop the whole declaration. A width, a padding or a colour silently falls back to its default, often only when a script that sets the variable fails.",
+    fixes: [
+      {
+        title: "Add a fallback",
+        when: "Best for most cases: the layout holds even when the variable is missing.",
+        css: `.element {
+  max-width: calc(100% - var(--actions-width, 120px));
+}`,
+      },
+      {
+        title: "Define it at the root",
+        when: "When the variable is a design token every page needs.",
+        css: `:root {
+  --actions-width: 120px;
+}`,
+      },
+      {
+        title: "Register it with an initial value",
+        when: "For variables a script updates: they always have a value.",
+        css: `@property --actions-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 120px;
+}`,
+      },
+    ],
+  },
+  "css/dropped-rule": {
+    id: "css/dropped-rule",
+    title: "A CSS rule is dropped because of one vendor selector",
+    severity: "medium",
+    why: "A selector list is all or nothing. Grouping ::-webkit-input-placeholder with ::-moz-placeholder means every browser meets one selector it doesn't know, and drops the whole rule.",
+    fixes: [
+      {
+        title: "Split the rule",
+        when: "Best for most cases: each browser reads the rule meant for it.",
+        css: `input::-webkit-input-placeholder {
+  color: var(--muted);
+}
+input::-moz-placeholder {
+  color: var(--muted);
+}`,
+      },
+      {
+        title: "Use the standard selector",
+        when: "When every browser you support knows it.",
+        css: `input::placeholder {
+  color: var(--muted);
+}`,
+      },
+      {
+        title: "Wrap the list in :is()",
+        when: "For pseudo-classes: :is() skips the parts a browser can't read. Pseudo-elements can't go inside it.",
+        css: `:is(:-webkit-autofill, :autofill) {
+  box-shadow: 0 0 0 40px var(--surface) inset;
 }`,
       },
     ],

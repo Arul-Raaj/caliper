@@ -119,6 +119,26 @@
     return stacked || track;
   };
 
+  // A slot whose overflow is one child running past it, with nothing
+  // stacked (a name pushing out of a pill, a photo wider than its card), is
+  // a box clipping its content, not a carousel.
+  const isCarousel = (el) => {
+    if (!isSlot(el)) return false;
+    const box = el.getBoundingClientRect();
+    const kids = [...el.children].filter((c) => css(c).display !== "none").map((c) => c.getBoundingClientRect());
+    const past = kids.filter((k) => k.right > box.right + 2 || k.left < box.left - 2 || k.bottom > box.bottom + 2 || k.top < box.top - 2).length;
+    if (past !== 1) return true;
+    return kids.some((a, x) => kids.some((b, y) => y > x && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5 * Math.min(a.height, b.height) && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 * Math.min(a.width, b.width)));
+  };
+  const inCarousel = (el) => {
+    let n = el.parentElement;
+    for (let i = 0; n && n !== document.body && i < 4; i++, n = n.parentElement) {
+      const s = css(n);
+      if ((hides(s.overflowY) || hides(s.overflowX)) && isCarousel(n)) return true;
+    }
+    return false;
+  };
+
   // Inside such a slot, each slide's overflow is hidden by design.
   const inSlot = (el) => {
     let n = el.parentElement;
@@ -308,6 +328,8 @@
   // still make the page scroll sideways.
   const rendered = [...document.body.querySelectorAll("*")].filter((el) => !SKIP.has(el.tagName) && !(el instanceof SVGElement && el.tagName !== "svg") && isVisible(el));
   const elements = rendered.filter((el) => !ignored(el) && !el.closest("[aria-hidden='true']"));
+  const listed = new Set(elements);
+  const drawn = new Set(rendered.filter((el) => !ignored(el)));
 
   // Mock-ups and illustrations (a product screenshot built in HTML) can't be
   // used, so their cropping is design, not a bug.
@@ -335,6 +357,25 @@
     }
     return right === -Infinity ? 0 : Math.round(right - inner);
   };
+
+  // The same past the left edge: a row packed to the end (justify-content:
+  // flex-end, row-reverse, right to left) overflows there, where nobody can
+  // scroll to it.
+  const flowLeft = (el) => {
+    const r = el.getBoundingClientRect();
+    const s = css(el);
+    const inner = r.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft);
+    let left = Infinity;
+    for (const c of el.children) {
+      const cs = css(c);
+      if (cs.position === "absolute" || cs.position === "fixed" || !isVisible(c)) continue;
+      const k = c.getBoundingClientRect();
+      if (k.width <= 2 || k.height <= 2) continue;
+      left = Math.min(left, k.left - Math.min(0, parseFloat(cs.marginLeft) || 0));
+    }
+    return left === Infinity ? 0 : Math.round(inner - left);
+  };
+  const spillOf = (el) => Math.max(flowOverflow(el), flowLeft(el));
 
   // A row of same-size items running past a clipping parent is a carousel or
   // a logo strip: it slides, or it's cropped, on purpose. Only for rows that
@@ -392,6 +433,53 @@
     return after > before + 2;
   };
 
+  // ---------- stylesheets ----------
+
+  // The style rules of every stylesheet the page can read (same origin),
+  // with those inside @media, @supports, @layer and nesting that apply now.
+  let styleRules;
+  const rulesOf = () => {
+    if (styleRules) return styleRules;
+    styleRules = [];
+    const walk = (list) => {
+      for (const rule of list) {
+        if (rule.media && rule.cssRules && !matchMedia(rule.media.mediaText).matches) continue;
+        // Whether a container query holds can't be read per element from
+        // here, so its rules are left out rather than guessed.
+        if (typeof CSSContainerRule !== "undefined" && rule instanceof CSSContainerRule) continue;
+        if (typeof CSSSupportsRule !== "undefined" && rule instanceof CSSSupportsRule && !CSS.supports(rule.conditionText)) continue;
+        if (typeof rule.selectorText === "string" && rule.style) styleRules.push(rule);
+        if (rule.cssRules) walk(rule.cssRules);
+      }
+    };
+    for (const sheet of document.styleSheets) {
+      try { walk(sheet.cssRules); } catch { /* another origin's sheet can't be read */ }
+    }
+    return styleRules;
+  };
+  // The values a property is given for an element: inline first, then the
+  // rules from last to first (source order, not specificity).
+  const authored = (el, prop) => [el.style.getPropertyValue(prop), ...rulesOf().filter((r) => {
+    try { return el.matches(r.selectorText); } catch { return false; }
+  }).map((r) => r.style.getPropertyValue(prop)).reverse()].filter(Boolean);
+  // Split a list at its top-level commas: "a, :is(b, c)" is two parts.
+  const splitTop = (text) => {
+    const parts = [];
+    let depth = 0;
+    let from = 0;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (c === "(" || c === "[") depth++;
+      else if (c === ")" || c === "]") depth--;
+      else if (c === "," && depth === 0) {
+        parts.push(text.slice(from, i).trim());
+        from = i + 1;
+      }
+    }
+    parts.push(text.slice(from).trim());
+    return parts.filter(Boolean);
+  };
+
   // ---------- colours and surfaces ----------
 
   // Computed colours can be oklch() or color(): a canvas turns any of them into sRGB.
@@ -442,6 +530,12 @@
 
   const CONTROL = "a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=switch], [role=checkbox], [role=radio], [role=tab], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=option], [role=row], [role=treeitem], [tabindex]:not([tabindex='-1'])";
   const inactive = (el) => el.matches(":disabled, [aria-disabled='true']");
+  const MODAL = "dialog, [role=dialog], [role=alertdialog], [aria-modal=true]";
+  // A banner people can close (cookies, a promo) is in the way only until they do.
+  const DISMISS = /^(accept|agree|allow|got it|ok(ay)?|dismiss|close|reject|decline|no,? thanks|×|✕|✖|x)(?!\p{L})/iu;
+  const dismissible = (el) => [...el.querySelectorAll("button, [role=button], a")].some((b) => DISMISS.test((b.getAttribute("aria-label") || b.textContent || "").trim()));
+  // Scroll the page without smooth scrolling, so a measurement sees the result at once.
+  const jump = (y) => window.scrollTo({ left: window.scrollX, top: y, behavior: "instant" });
   const typesText = (el) => el.isContentEditable || el.matches("textarea, select, input:not([type=button], [type=submit], [type=reset], [type=checkbox], [type=radio], [type=range], [type=color], [type=file])");
 
   // The box around what a control shows: its text, its icons, its images.
@@ -614,6 +708,306 @@
       }
       return true;
     },
+
+    // ---------- backgrounds: tiles that repeat by accident, and stretched ones ----------
+
+    backgrounds: async () => {
+      const sizes = new Map();
+      const natural = (url) => {
+        if (!sizes.has(url)) {
+          sizes.set(url, new Promise((done) => {
+            const img = new Image();
+            const timer = setTimeout(() => done(null), 3000);
+            img.onload = () => { clearTimeout(timer); done(img.naturalWidth && img.naturalHeight ? [img.naturalWidth, img.naturalHeight] : null); };
+            img.onerror = () => { clearTimeout(timer); done(null); };
+            img.src = url;
+          }));
+        }
+        return sizes.get(url);
+      };
+      const resolve = (v, total) => (v === "auto" || v === undefined ? null : v.endsWith("%") ? (total * parseFloat(v)) / 100 : parseFloat(v));
+      const tileOf = (size, [nw, nh], W, H) => {
+        if (size === "cover" || size === "contain") {
+          const k = (size === "cover" ? Math.max : Math.min)(W / nw, H / nh);
+          return { w: nw * k, h: nh * k, both: false, relative: true };
+        }
+        const [a, b = "auto"] = size.split(/\s+/);
+        let w = resolve(a, W);
+        let h = resolve(b, H);
+        const both = w !== null && h !== null;
+        if (w === null && h === null) [w, h] = [nw, nh];
+        else if (w === null) w = (h * nw) / nh;
+        else if (h === null) h = (w * nh) / nw;
+        return { w, h, both, relative: /%/.test(size) };
+      };
+      const axes = (repeat) => {
+        const [a, b] = repeat.split(/\s+/);
+        if (b) return [a, b];
+        return a === "repeat-x" ? ["repeat", "no-repeat"] : a === "repeat-y" ? ["no-repeat", "repeat"] : [a, a];
+      };
+      for (const el of elements) {
+        const s = css(el);
+        // role=img on the element itself is how a background photo is
+        // labelled, so it counts; inside a mock-up it doesn't.
+        if (!s.backgroundImage.includes("url(") || el.matches("[role=presentation], [role=none]") || (el.parentElement && decorative(el.parentElement))) continue;
+        const W = el.clientWidth;
+        const H = el.clientHeight;
+        if (W < 16 || H < 16) continue;
+        const images = splitTop(s.backgroundImage);
+        const bgSizes = splitTop(s.backgroundSize);
+        const repeats = splitTop(s.backgroundRepeat);
+        const places = splitTop(s.backgroundPosition);
+        for (let i = 0; i < images.length; i++) {
+          const url = images[i].match(/^url\(["']?(.*?)["']?\)$/)?.[1];
+          if (!url) continue;
+          const nat = await natural(new URL(url, document.baseURI).href);
+          if (!nat) continue;
+          const size = bgSizes[i % bgSizes.length];
+          const tile = tileOf(size, nat, W, H);
+          const svg = /^data:image\/svg|\.svg($|[?#])/i.test(url);
+          const ratio = nat[0] / nat[1];
+          if (tile.both && !svg && Math.abs(tile.w / tile.h - ratio) / ratio > 0.05) {
+            push("img-distorted", el, { naturalWidth: nat[0], naturalHeight: nat[1], shownWidth: Math.round(tile.w), shownHeight: Math.round(tile.h), background: true });
+          }
+          const [rx, ry] = axes(repeats[i % repeats.length]);
+          const place = places[i % places.length];
+          // A small tile repeated from the corner is a pattern on purpose.
+          // A tile that is big, sized to the box, or placed at an offset
+          // (a corner mark) only repeats by accident.
+          const placed = /right|bottom|[1-9]/.test(place.replace(/\b0(px|%)?/g, "")) && !/center|50%/.test(place);
+          const accident = (t, total) => t < total - 1 && (t >= total * 0.5 || tile.relative || (placed && t >= 24));
+          const x = rx === "repeat" && accident(tile.w, W);
+          const y = ry === "repeat" && accident(tile.h, H);
+          // A full-width band whose tile is fixed in size tiles on wider screens.
+          const wideAt = !x && rx === "repeat" && !tile.relative && el.getBoundingClientRect().width >= vw - 1 && tile.w >= W - 1 && tile.w < 2560 ? Math.round(tile.w) : 0;
+          if (x || y || wideAt) push("bg-tiles", el, { tileWidth: Math.round(tile.w), tileHeight: Math.round(tile.h), areaWidth: W, areaHeight: H, axis: x && y ? "both" : x ? "x" : y ? "y" : "x", wideAt });
+        }
+      }
+      return answer();
+    },
+
+    // ---------- stylesheets: variables that resolve to nothing, rules the browser drops ----------
+
+    sheets: async () => {
+      // The var() references with no fallback: var(--a) counts, var(--a, 8px) doesn't.
+      const bareVars = (value) => {
+        const out = [];
+        for (let i = value.indexOf("var("); i !== -1; i = value.indexOf("var(", i + 1)) {
+          let depth = 0;
+          let j = i + 3;
+          for (; j < value.length; j++) {
+            if (value[j] === "(") depth++;
+            else if (value[j] === ")" && --depth === 0) break;
+          }
+          const inner = value.slice(i + 4, j);
+          if (splitTop(inner).length === 1 && /^\s*--[\w-]+\s*$/.test(inner)) out.push(inner.trim());
+          // A fallback's own references only matter when the variable is unset.
+          if (splitTop(inner).length > 1) i = j;
+        }
+        return out;
+      };
+      const PSEUDO = /::?(before|after|placeholder|marker|selection|first-line|first-letter|backdrop|file-selector-button|-webkit-[\w-]+|-moz-[\w-]+)(\([^)]*\))?/g;
+      const reported = new Set();
+      for (const rule of rulesOf()) {
+        for (const m of rule.style.cssText.matchAll(/(?:^|;)\s*([-\w]+)\s*:\s*([^;]+)/g)) {
+          const [, prop, value] = m;
+          if (prop.startsWith("--") || !value.includes("var(")) continue;
+          for (const name of bareVars(value)) {
+            const key = `${name}|${prop}`;
+            if (reported.has(key)) continue;
+            let els = [];
+            try { els = [...document.querySelectorAll(rule.selectorText.replace(PSEUDO, "") || "*")].slice(0, 50); } catch { continue; }
+            // Decorative icons count too: an unset fill hides them all the same.
+            const el = els.find((e) => drawn.has(e) && !css(e).getPropertyValue(name).trim());
+            if (!el) continue;
+            reported.add(key);
+            push("var-unresolved", el, { variable: name, property: prop, rule: rule.selectorText.slice(0, 120) });
+          }
+        }
+      }
+
+      // A selector list with one part this browser doesn't know drops the
+      // whole rule: ::-webkit-input-placeholder, ::-moz-placeholder { … }.
+      const texts = [];
+      for (const sheet of document.styleSheets) {
+        const node = sheet.ownerNode;
+        try {
+          if (node?.tagName === "STYLE") texts.push([node.textContent ?? "", "a <style> tag"]);
+          else if (sheet.href && new URL(sheet.href).origin === location.origin) texts.push([await (await fetch(sheet.href, { cache: "force-cache" })).text(), sheet.href.split(/[?#]/)[0].split("/").pop()]);
+        } catch { /* unreadable */ }
+      }
+      const VENDOR = /::?-(webkit|moz|ms|o)-/;
+      const supported = (part) => {
+        try { return CSS.supports(`selector(${part})`); } catch { return false; }
+      };
+      for (const [raw, sheet] of texts) {
+        const text = raw.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "));
+        for (const m of text.matchAll(/([^{};]+)\{/g)) {
+          const prelude = m[1].trim();
+          if (!prelude || prelude.startsWith("@") || !VENDOR.test(prelude)) continue;
+          const parts = splitTop(prelude);
+          if (parts.length < 2) continue;
+          const bad = parts.filter((p) => !supported(p));
+          const good = parts.filter((p) => supported(p));
+          // Meant for this browser too (one part works here), and dropped.
+          if (!bad.length || !good.length) continue;
+          let el = document.body;
+          for (const p of good) {
+            try {
+              const hit = [...document.querySelectorAll(p.replace(PSEUDO, "") || "*")].find((e) => listed.has(e));
+              if (hit) { el = hit; break; }
+            } catch { /* not a selector querySelector takes */ }
+          }
+          push("dropped-rule", el, { selector: prelude.replace(/\s+/g, " ").slice(0, 140), unsupported: bad.join(", ").slice(0, 80), sheet, line: text.slice(0, m.index + m[0].indexOf(m[1].trimStart())).split("\n").length });
+        }
+      }
+      return answer();
+    },
+
+    // ---------- text laid over an image, for when the image fails ----------
+
+    overImage: () => {
+      // Any image the text sits on: a positioned photo under the text, or a
+      // caption positioned over a photo in the flow.
+      const layers = rendered.filter((el) => el.tagName === "IMG" || el.tagName === "VIDEO").map((el) => el.getBoundingClientRect());
+      const list = [];
+      for (const el of elements) {
+        if (!hasOwnText(el) || decorative(el) || css(el).textShadow !== "none") continue;
+        const t = textBox(el);
+        if (t.right === -Infinity) continue;
+        const area = (t.right - t.left) * (t.bottom - t.top);
+        const covered = layers.some((r) => Math.max(0, Math.min(r.right, t.right) - Math.max(r.left, t.left)) * Math.max(0, Math.min(r.bottom, t.bottom) - Math.max(r.top, t.top)) >= area * 0.5);
+        let painted = false;
+        for (let n = el, i = 0; n && n !== document.body && i < 6 && !painted; n = n.parentElement, i++) painted = css(n).backgroundImage.includes("url(");
+        if (!covered && !painted) continue;
+        const s = css(el);
+        list.push({ el, selector: selectorFor(el), label: labelFor(el), role: roleFor(el), box: { x: Math.round(t.left + window.scrollX), y: Math.round(t.top + window.scrollY), width: Math.round(t.right - t.left), height: Math.round(t.bottom - t.top) }, color: s.color, large: parseFloat(s.fontSize) >= 24 || (parseFloat(s.fontSize) >= 18.66 && Number(s.fontWeight) >= 700) });
+        if (list.length >= 40) break;
+      }
+      globalThis.__caliperTexts = list.map((x) => x.el);
+      return list.map(({ el, ...rest }) => rest);
+    },
+
+    // Hide the listed text for one screenshot, and put it back.
+    textStyle: ({ hide }) => {
+      const worn = (globalThis.__caliperTextWorn ??= new Map());
+      for (const [el, saved] of worn) for (const [k, v, prio] of saved) v ? el.style.setProperty(k, v, prio) : el.style.removeProperty(k);
+      worn.clear();
+      if (!hide) return true;
+      for (const el of globalThis.__caliperTexts ?? []) {
+        const styles = { color: "transparent", "-webkit-text-fill-color": "transparent", "text-decoration-color": "transparent", transition: "none" };
+        worn.set(el, Object.keys(styles).map((k) => [k, el.style.getPropertyValue(k), el.style.getPropertyPriority(k)]));
+        for (const [k, v] of Object.entries(styles)) el.style.setProperty(k, v, "important");
+      }
+      return true;
+    },
+
+    // ---------- scrolling an overlay past its end ----------
+
+    // Scrollers laid over the page (a dialog, a drawer, a chat panel, an open
+    // list) whose scrolling is passed on to the page at their end.
+    chainers: () => {
+      const page = root.scrollHeight > window.innerHeight + 2 && !hides(css(root).overflowY) && !hides(css(document.body).overflowY);
+      if (!page) return [];
+      return elements.filter((el) => {
+        const s = css(el);
+        if (!scrolls(s.overflowY) || el.scrollHeight <= el.clientHeight + 2 || el.clientHeight < 48 || s.overscrollBehaviorY !== "auto" || FORM.has(el.tagName) || decorative(el)) return false;
+        return insideFixedOnly(el) || Boolean(el.closest(`${MODAL}, [role=listbox], [role=menu]`));
+      }).slice(0, 6).map((el) => ({ selector: selectorFor(el), label: labelFor(el) }));
+    },
+
+    // Scroll the box to its end and the page to the top, and say where to
+    // turn the wheel. With `contain`, try the fix as well.
+    chainStart: ({ selector, contain }) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      globalThis.__caliperChain = { y: window.scrollY, top: el.scrollTop, overscroll: [el.style.getPropertyValue("overscroll-behavior-y"), el.style.getPropertyPriority("overscroll-behavior-y")] };
+      if (contain) el.style.setProperty("overscroll-behavior-y", "contain", "important");
+      jump(0);
+      el.scrollTop = el.scrollHeight;
+      const r = el.getBoundingClientRect();
+      const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+      return x >= 0 && x < vw && y >= 0 && y < window.innerHeight ? { x, y } : null;
+    },
+
+    chainEnd: ({ selector, report, contained }) => {
+      const el = document.querySelector(selector);
+      const moved = window.scrollY > 0;
+      const saved = globalThis.__caliperChain;
+      if (el && saved) {
+        const [v, prio] = saved.overscroll;
+        v ? el.style.setProperty("overscroll-behavior-y", v, prio) : el.style.removeProperty("overscroll-behavior-y");
+        el.scrollTop = saved.top;
+        jump(saved.y);
+      }
+      if (report && el) push("chains-to-page", el, { contained });
+      return { moved, ...answer() };
+    },
+
+    // ---------- touch screens: hover styles that stick, fields that zoom ----------
+
+    // Elements with a :hover rule that applies on this screen (not inside
+    // @media (hover: hover)) and changes more than colour.
+    hoverRules: () => {
+      const QUIET = /^(color|text-decoration|text-underline|cursor|transition|outline|caret|fill|stroke|-webkit-text-fill|text-emphasis|animation)/;
+      const found = new Map();
+      for (const rule of rulesOf()) {
+        if (!rule.selectorText.includes(":hover") || ![...rule.style].some((p) => !QUIET.test(p) && !p.startsWith("--"))) continue;
+        for (const part of splitTop(rule.selectorText)) {
+          const host = part.split(":hover")[0].trim();
+          if (!part.includes(":hover") || !host || /[>+~]$/.test(host) || found.has(host)) continue;
+          let el;
+          try { el = [...document.querySelectorAll(host)].find((e) => listed.has(e) && !decorative(e) && !e.closest(MODAL)); } catch { continue; }
+          if (el) found.set(host, { selector: selectorFor(el), label: labelFor(el) });
+        }
+      }
+      return [...found.values()].slice(0, 8);
+    },
+
+    // What a hover can change that matters on a touch screen: a lift or a
+    // shadow, a fill where there was none, or parts that appear. A colour
+    // shift on a link or a darker button doesn't count.
+    touchLook: ({ selector }) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const parts = [el, ...[...el.querySelectorAll("*")].slice(0, 30)];
+      return {
+        lift: parts.map((p) => {
+          const s = css(p);
+          return [s.transform, s.translate, s.scale, s.boxShadow].join("|");
+        }),
+        fill: visibleFill(el),
+        shown: parts.map((p) => {
+          const s = css(p);
+          return s.display !== "none" && s.visibility !== "hidden" && Number(s.opacity) > 0.05;
+        }),
+      };
+    },
+
+    touchReport: ({ selector, revealed, change }) => {
+      const el = document.querySelector(selector);
+      if (el) push("sticks-on-touch", el, { revealed, change });
+      return answer();
+    },
+
+    // Text fields under 16 px, which iOS zooms into when they take focus.
+    // A viewport tag that blocks zooming stops that (and pinch zoom with it).
+    fields: () => {
+      const tag = document.querySelector("meta[name='viewport' i]")?.getAttribute("content") ?? "";
+      if (/maximum-scale\s*=\s*1(\.0*)?(?![\d.])|user-scalable\s*=\s*(no|0)/i.test(tag)) return [];
+      return elements.filter((el) => typesText(el) && !el.matches("[readonly], :disabled") && !decorative(el)).slice(0, 12).map((el) => ({ selector: selectorFor(el), label: labelFor(el) }));
+    },
+
+    fieldSize: ({ selector }) => {
+      const el = document.querySelector(selector);
+      return el ? parseFloat(css(el).fontSize) : null;
+    },
+
+    fieldReport: ({ selector, size }) => {
+      const el = document.querySelector(selector);
+      if (el) push("focus-zoom", el, { size: Math.round(size * 10) / 10 });
+      return answer();
+    },
   };
   if (probe) return probes[probe.op](probe);
 
@@ -642,7 +1036,10 @@
     for (const el of spilled) reachOf.set(el, textReach(el));
     const culprits = [...outer, ...spilled].filter((el) => !ignored(el)).sort((a, b) => far(b) - far(a));
     for (const el of culprits) {
-      push("page-overflow", el, { pageWidth: root.scrollWidth, viewportWidth: vw, right: Math.round(far(el)) });
+      // A set width is the usual cause: cap it at the screen and see.
+      const width = authored(el, "width").find((v) => /^[\d.]+(px|rem|em)$/.test(v)) ?? "";
+      const fits = withStyles(el, { "max-width": "100%", "min-width": "0" }, () => root.scrollWidth <= vw + 1);
+      push("page-overflow", el, { pageWidth: root.scrollWidth, viewportWidth: vw, right: Math.round(far(el)), width, fits, media: el.matches("img, video, canvas, svg, iframe") });
     }
     // The page still scrolls when the culprit has no element to measure,
     // such as a ::before or ::after layer.
@@ -709,39 +1106,155 @@
     push("clip-x", el, { ...widths(el), longestWord: longestWord(el), reveals: fitsWith(el, REVEAL) });
   }
 
+  // Text cut by a box around it, not by its own: a name in a pill with a
+  // fixed width and overflow: hidden. No ellipsis anywhere on the way.
+  {
+    const seen = new Set([...spill, ...clip]);
+    const cutBy = [];
+    for (const el of elements) {
+      if (FORM.has(el.tagName) || !holdsText(el) || seen.has(el) || hides(css(el).overflowX) || inCarousel(el) || decorative(el)) continue;
+      const r = el.getBoundingClientRect();
+      for (let n = el.parentElement, i = 0; n && n !== document.body && i < 5; n = n.parentElement, i++) {
+        const s = css(n);
+        if (s.textOverflow === "ellipsis" || clamped(s) || scrolls(s.overflowX) || seen.has(n)) break;
+        if (!hides(s.overflowX)) continue;
+        const c = n.getBoundingClientRect();
+        const inner = { left: c.left + parseFloat(s.borderLeftWidth), right: c.right - parseFloat(s.borderRightWidth) };
+        if (Math.max(r.left + el.scrollWidth, r.right) <= inner.right + 2 && r.left >= inner.left - 2) break;
+        const t = textBox(el);
+        const past = Math.max(t.right - inner.right, inner.left - t.left);
+        // Text pushed wholly out (a logo's hidden label) or a moving part is on purpose.
+        if (past > 2 && past < t.right - t.left && !animating(n) && !isCarousel(n) && !inCarousel(n)) cutBy.push([el, n, past, t]);
+        break;
+      }
+    }
+    for (const [el, n, past, t] of cutBy.filter(([el]) => !cutBy.some(([other]) => other !== el && el.contains(other)))) {
+      const reveals = withStyles(el, { ...BREAK, "max-width": "100%" }, () => {
+        const k = textBox(el);
+        const c = n.getBoundingClientRect();
+        return k.right <= c.right + 2 && k.left >= c.left - 2;
+      });
+      push("clip-x", el, { contentWidth: Math.round(t.right - t.left), boxWidth: Math.round(t.right - t.left - past), gap: Math.round(past), longestWord: longestWord(el), reveals, by: labelFor(n) });
+    }
+  }
+
   // ---------- 3. flex and grid containers that overflow ----------
+
+  // Grid tracks in px, from the computed value: "250px 1fr" computes to "250px 38px".
+  const tracksOf = (el) => (css(el).gridTemplateColumns.match(/-?[\d.]+px/g) ?? []).map(parseFloat);
+  const pageWide = () => root.scrollWidth > vw + 1;
+  // Text an item shows past its own edges. Text cut by an ellipsis or a
+  // clipping box doesn't count: nobody sees it.
+  const clipBox = (el) => {
+    const shown = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      const s = css(n);
+      if (s.overflowX === "visible" && s.overflowY === "visible") continue;
+      const c = n.getBoundingClientRect();
+      shown.left = Math.max(shown.left, c.left);
+      shown.top = Math.max(shown.top, c.top);
+      shown.right = Math.min(shown.right, c.right);
+      shown.bottom = Math.min(shown.bottom, c.bottom);
+    }
+    return shown;
+  };
+  const shownPast = (el) => {
+    const r = el.getBoundingClientRect();
+    const t = textBox(el, clipBox);
+    return Math.max(t.right - r.right, r.left - t.left);
+  };
+  const textFits = (els) => els.every((c) => shownPast(c) <= 2);
+  // Does anything inside this box push the page wider than the screen?
+  const spillsPage = (el) => [el, ...el.querySelectorAll("*")].slice(0, 600).some((d) => d.getBoundingClientRect().right > vw + 1 && !containedX(d) && isVisible(d));
 
   const grids = [];
   for (const el of elements) {
     const s = css(el);
-    // Under 8 px is usually a deliberate negative margin (a bigger hit area), not a break.
-    if (el.scrollWidth <= el.clientWidth + 8 || scrolls(s.overflowX) || hides(s.overflowX)) continue;
-    if (decorative(el) || flowOverflow(el) <= 8) continue;
+    const flex = s.display.includes("flex");
+    if (!flex && !s.display.includes("grid")) continue;
+    if (scrolls(s.overflowX) || hides(s.overflowX) || decorative(el)) continue;
+    // Up to 3 px is rounding. Negative margins are left out of the measurement.
+    const over = spillOf(el);
+    if (over <= 3) continue;
+    // A few pixels into its own padding (an icon a little wider than its
+    // track) stays inside the box: nothing looks broken.
+    if (over < 8 && over < Math.min(parseFloat(s.paddingLeft), parseFloat(s.paddingRight)) - 4) continue;
+    if (!flex) {
+      grids.push(el);
+      continue;
+    }
+    if (s.flexDirection.startsWith("column") || s.flexWrap !== "nowrap") continue;
+    const kids = [...el.children].filter((c) => isVisible(c) && !/absolute|fixed/.test(css(c).position));
+    if (!kids.length) continue;
+    const fits = () => spillOf(el) <= 2 && textFits(kids);
+    const side = flowLeft(el) > flowOverflow(el) ? "left" : "right";
+    const base = { container: selectorFor(el), containerWidth: el.clientWidth, contentWidth: el.clientWidth + over, side };
+    const track = isTrack(el);
 
-    if (s.display.includes("flex") && !s.flexDirection.startsWith("column") && s.flexWrap === "nowrap") {
-      const items = [...el.children].filter((c) => isVisible(c) && css(c).minWidth === "auto" && !scrolls(css(c).overflowX) && !hides(css(c).overflowX));
-      if (!items.length) continue;
-      // Items wider than an equal share of the row are the ones refusing to shrink.
-      const share = el.clientWidth / items.length;
-      const over = flowOverflow(el);
-      // Test the cause: let every item shrink and see whether the row fits.
-      const confirmed = trial(items, { "min-width": "0" }, () => flowOverflow(el) <= 2);
-      if (!confirmed && isTrack(el)) continue;
-      for (const item of items.filter((c) => c.getBoundingClientRect().width > share).slice(0, 3)) {
-        push("flex-shrink", item, { container: selectorFor(el), containerWidth: el.clientWidth, contentWidth: el.clientWidth + over, itemWidth: Math.round(item.getBoundingClientRect().width), longestWord: longestWord(item), confirmed });
+    // A set width that won't give way (a width plus flex: none) is the
+    // cause, not the content. Release it and see.
+    if (!track) {
+      const rigid = kids.filter((c) => {
+        const cs = css(c);
+        if (parseFloat(cs.flexShrink) !== 0 || c.matches("img, svg, video, canvas, iframe, input, select, textarea")) return false;
+        const w = c.getBoundingClientRect().width;
+        return w > el.clientWidth / kids.length && withStyles(c, { width: "auto", "flex-basis": "auto" }, () => Math.abs(c.getBoundingClientRect().width - w) > 2);
+      });
+      if (rigid.length && trial(rigid, { "flex-shrink": "1", "min-width": "0" }, fits)) {
+        for (const item of rigid.slice(0, 3)) push("fixed-width", item, { ...base, itemWidth: Math.round(item.getBoundingClientRect().width) });
+        continue;
       }
     }
 
-    if (s.display.includes("grid")) grids.push(el);
+    // Scroll containers already shrink: their minimum is 0. overflow: clip
+    // doesn't make one, and the browser gives images and form fields clip.
+    const items = kids.filter((c) => {
+      const cs = css(c);
+      return cs.minWidth === "auto" && !scrolls(cs.overflowX) && cs.overflowX !== "hidden";
+    });
+    // Test the cause: let every item shrink, and check that the row fits
+    // with each item's text still inside it. Failing that, let the row wrap.
+    const confirmed = items.length > 0 && trial(items, { "min-width": "0" }, fits);
+    if (!confirmed && track) continue;
+    const wraps = !confirmed && withStyles(el, { "flex-wrap": "wrap" }, fits);
+    // Items wider than an equal share of the row are the ones refusing to
+    // shrink. The one furthest over its share leads.
+    const share = el.clientWidth / kids.length;
+    const lead = (items.length ? items : kids)
+      .map((c) => [c, c.getBoundingClientRect().width - share])
+      .filter(([, d]) => d > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+    for (const [item] of lead) {
+      push("flex-shrink", item, { ...base, itemWidth: Math.round(item.getBoundingClientRect().width), longestWord: longestWord(item), confirmed, wraps, items: kids.length });
+    }
   }
   // A grid inside a grid that blows out takes its parent with it: report
   // the innermost one, where the fix goes.
   for (const el of deepest(grids)) {
-    // Test the cause: give every item a minimum of zero and see whether the grid fits.
     const kids = [...el.children].filter(isVisible);
-    const confirmed = trial(kids, { "min-width": "0" }, () => flowOverflow(el) <= 2);
+    const wasWide = pageWide();
+    // Fitting means the grid fits and nothing in it still pushes the page wider.
+    const fits = () => spillOf(el) <= 2 && !(wasWide && spillsPage(el));
+    const confirmed = trial(kids, { "min-width": "0" }, fits);
     if (!confirmed && isTrack(el)) continue;
-    push("grid-blowout", el, { containerWidth: el.clientWidth, contentWidth: el.clientWidth + flowOverflow(el), columns: css(el).gridTemplateColumns, confirmed });
+    // Columns that keep their size with no room at all are fixed: 250px,
+    // repeat(3, 300px), minmax(240px, 1fr).
+    const zero = withStyles(el, { width: "0px", "min-width": "0", "max-width": "0px" }, () => trial(kids, { "min-width": "0" }, () => tracksOf(el)));
+    const fixedSum = Math.round(zero.filter((v) => v > 1).reduce((a, b) => a + b, 0));
+    // Fixed columns are the cause when they take most of the room, or when
+    // shrinking the content doesn't help.
+    const fixedCause = fixedSum > 0 && (!confirmed || fixedSum > el.clientWidth * 0.6);
+    const stacks = fixedCause && withStyles(el, { "grid-template-columns": "minmax(0, 1fr)" }, () => trial(kids, { "min-width": "0", "grid-column": "auto" }, fits));
+    push("grid-blowout", el, {
+      containerWidth: el.clientWidth,
+      contentWidth: el.clientWidth + spillOf(el),
+      columns: css(el).gridTemplateColumns,
+      fixed: zero.map((v) => (v > 1 ? `${Math.round(v)}px` : "flex")).join(" "),
+      fixedSum: fixedCause ? fixedSum : 0,
+      confirmed: confirmed && !fixedCause,
+      stacks,
+    });
   }
 
   // ---------- 4. fixed heights that can't fit their content ----------
@@ -763,7 +1276,26 @@
     if (!hasFixedHeight(el)) continue;
     tall.push(el);
   }
+  // The items of the flex columns inside a box, a few levels down.
+  const columnItems = (el, depth = 0) => {
+    const s = css(el);
+    if (depth > 3 || !s.display.includes("flex") || !s.flexDirection.startsWith("column")) return [];
+    return [...el.children].filter(isVisible).flatMap((c) => [c, ...columnItems(c, depth + 1)]);
+  };
   for (const el of deepest(tall)) {
+    // In a flex column the set height may be right: an item that won't
+    // shrink below its content (min-height: auto) stops the list inside
+    // from scrolling. Test that before blaming the height.
+    const items = columnItems(el).filter((c) => css(c).minHeight === "auto");
+    if (items.length) {
+      const before = new Map(items.map((c) => [c, c.getBoundingClientRect().height]));
+      const shrunk = trial(items, { "min-height": "0" }, () => (el.scrollHeight <= el.clientHeight + 2 ? items.map((c) => [c, before.get(c) - c.getBoundingClientRect().height]) : null));
+      if (shrunk) {
+        const [item] = shrunk.sort((a, b) => b[1] - a[1])[0];
+        push("flex-column", item, { container: selectorFor(el), containerHeight: el.clientHeight, contentHeight: el.scrollHeight, itemHeight: Math.round(before.get(item)) });
+        continue;
+      }
+    }
     push("fixed-height", el, { contentHeight: el.scrollHeight, boxHeight: el.clientHeight, clipped: hides(css(el).overflowY) });
   }
 
@@ -782,18 +1314,96 @@
     return { src: img.currentSrc || img.src, selector: selectorFor(img), label: labelFor(img), width: Math.round(r.width), height: Math.round(r.height), box: box(img), visible: isVisible(img) && !ignored(img), around: surroundings(img) };
   });
 
+  // How a flex or grid item lines up across the row: stretch fills the row's height.
+  const alignOf = (el) => {
+    const p = el.parentElement;
+    if (!p) return "";
+    const ps = css(p);
+    if (!/flex|grid/.test(ps.display)) return "";
+    const own = css(el).alignSelf;
+    return own === "auto" ? ps.alignItems : own;
+  };
+  const stretches = (el) => /^(normal|stretch)$/.test(alignOf(el));
+
   for (const img of document.images) {
     if (!img.complete || img.naturalWidth === 0 || !isVisible(img) || ignored(img) || img.closest("[aria-hidden='true']")) continue;
     const s = css(img);
-    if (s.objectFit !== "fill") continue;
-    const w = img.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
-    const h = img.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom);
+    const size = () => [img.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight), img.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom)];
+    const [w, h] = size();
     if (w < 16 || h < 16) continue;
     const natural = img.naturalWidth / img.naturalHeight;
-    const shown = w / h;
-    if (Math.abs(shown - natural) / natural > 0.05) {
-      push("img-distorted", img, { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, shownWidth: Math.round(w), shownHeight: Math.round(h) });
+    const off = ([a, b]) => Math.abs(a / b - natural) / natural > 0.05;
+    // An SVG keeps its shape in any box (preserveAspectRatio): it
+    // letterboxes, it doesn't stretch. A round one still turns into an oval
+    // when a row stretches its box.
+    if (/^data:image\/svg|\.svg($|[?#])/i.test(img.currentSrc || img.src)) {
+      if (!off([w, h]) || !stretches(img) || w > 96) continue;
+      const own = withStyles(img, { "align-self": "flex-start" }, () => img.getBoundingClientRect());
+      const radius = s.borderTopLeftRadius;
+      const round = radius.endsWith("%") ? parseFloat(radius) >= 50 : parseFloat(radius) >= Math.min(own.width, own.height) / 2 - 1;
+      if (round && own.height >= 8 && h >= own.height * 1.2) push("stretched-shape", img, { width: Math.round(img.clientWidth), height: Math.round(img.clientHeight), ownWidth: Math.round(own.width), ownHeight: Math.round(own.height), round });
+      continue;
     }
+    if (s.objectFit !== "fill") continue;
+    if (off([w, h])) {
+      // Test the usual cause in a row: the row stretches the image to its height.
+      const stretched = stretches(img) && withStyles(img, { "align-self": "flex-start" }, () => !off(size()));
+      push("img-distorted", img, { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, shownWidth: Math.round(w), shownHeight: Math.round(h), stretched });
+    }
+  }
+
+  // A square or round shape (an avatar, an icon tile, a step number) that
+  // the row stretches to its own height, so a circle becomes a pill.
+  // Initials avatars are often aria-hidden: their shape still shows.
+  for (const el of rendered) {
+    if (el.matches("img, svg, video, canvas, input, select, textarea, iframe") || ignored(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width > 96 || r.width < 8 || !stretches(el)) continue;
+    const ps = css(el.parentElement);
+    if (ps.display.includes("flex") && ps.flexDirection.startsWith("column")) continue;
+    const s = css(el);
+    if (/absolute|fixed/.test(s.position) || !isSurface(el) || decorative(el)) continue;
+    const own = withStyles(el, { "align-self": "flex-start" }, () => el.getBoundingClientRect());
+    if (own.height < 8 || r.height < own.height * 1.2) continue;
+    const radius = s.borderTopLeftRadius;
+    const round = radius.endsWith("%") ? parseFloat(radius) >= 50 : parseFloat(radius) >= Math.min(own.width, own.height) / 2 - 1;
+    const square = Math.abs(own.width / own.height - 1) <= 0.12;
+    if (!square && !round) continue;
+    push("stretched-shape", el, { width: Math.round(r.width), height: Math.round(r.height), ownWidth: Math.round(own.width), ownHeight: Math.round(own.height), round });
+  }
+
+  // An image, video or canvas wider than the box it sits in, because
+  // nothing caps it at the box (max-width: 100%).
+  for (const el of elements) {
+    if (!el.matches("img, video, canvas")) continue;
+    const s = css(el);
+    if (s.maxWidth !== "none" || /absolute|fixed/.test(s.position) || parseFloat(s.marginLeft) < 0 || parseFloat(s.marginRight) < 0 || decorative(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width >= vw - 1) continue; // full bleed on purpose
+    // A carousel runs several slides past its edge, or stacks them. A card
+    // that clips one wide image is the bug itself.
+    if (inCarousel(el)) continue;
+    let cb = el.parentElement;
+    while (cb && cb !== document.body && /^(inline|contents)$/.test(css(cb).display)) cb = cb.parentElement;
+    if (!cb) continue;
+    const cs = css(cb);
+    if (/flex|grid/.test(cs.display)) continue; // the row and grid checks cover these
+    let scroller = false;
+    for (let n = cb; n && n !== document.body; n = n.parentElement) if (scrolls(css(n).overflowX)) scroller = true;
+    if (scroller) continue;
+    const room = () => {
+      const c = cb.getBoundingClientRect();
+      const left = c.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+      const right = c.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight);
+      const k = el.getBoundingClientRect();
+      return { past: Math.max(k.right - right, left - k.left), width: right - left };
+    };
+    const { past, width } = room();
+    if (past <= 1) continue;
+    let clipped = false;
+    for (let n = cb; n && n !== document.body; n = n.parentElement) if (hides(css(n).overflowX)) clipped = true;
+    const fits = withStyles(el, { "max-width": "100%", height: "auto" }, () => room().past <= 1);
+    push("wider-than-box", el, { width: Math.round(r.width), room: Math.round(width), past: Math.ceil(past), clipped, fits });
   }
 
   // ---------- 6. tap targets (touch screens only) ----------
@@ -882,6 +1492,20 @@
       const available = room(el);
       if (needed <= available + 1) push("label-wrap", el, { lines: n, width: Math.round(el.getBoundingClientRect().width), needed: Math.ceil(needed), available: Math.round(available) });
     }
+
+    // A button with a short label ("OK", "Go", a two-letter translation) and
+    // no minimum width shrinks to a narrow chip that doesn't read as a button.
+    for (const el of deepest(buttons)) {
+      const text = (el.textContent || "").trim().replace(/\s+/g, " ");
+      if (el.matches("[role=tab]") || cutBox(el) || !/\p{L}/u.test(text) || [...text].length > 24) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width >= 44 && r.width >= r.height) continue;
+      if (parseFloat(css(el).minWidth) > 0) continue;
+      // Equal buttons side by side (a segmented control) are sized as a set.
+      const set = [...(el.parentElement?.children ?? [])].filter((c) => c !== el && c.tagName === el.tagName && isVisible(c));
+      if (set.length && set.every((c) => Math.abs(c.getBoundingClientRect().width - r.width) <= 1)) continue;
+      push("short-button", el, { width: Math.round(r.width), height: Math.round(r.height), text: text.slice(0, 24) });
+    }
   }
 
   // ---------- 8. fixed panels that run off a small screen ----------
@@ -890,7 +1514,22 @@
     const vh = window.innerHeight;
     const scrollsInside = (el) =>
       [el, ...el.querySelectorAll("*")].some((n) => scrolls(css(n).overflowY) && n.scrollHeight > n.clientHeight + 2);
+    // A sticky panel taller than the screen: its end only comes into view
+    // when its container runs out, often at the very end of the page.
+    const tallSticky = (el) => {
+      const s = css(el);
+      if (s.top === "auto" || (el.parentElement && insideFixed(el.parentElement))) return;
+      const top = parseFloat(s.top) || 0;
+      const r = el.getBoundingClientRect();
+      const room = vh - top;
+      if (r.height <= room + 8 || !(el.textContent || "").trim() || scrollsInside(el)) return;
+      // A parent no taller than the panel gives it no room to stick at all.
+      if (!el.parentElement || el.parentElement.getBoundingClientRect().height < r.height + 48) return;
+      const fits = withStyles(el, { "max-height": `calc(100dvh - ${top}px)`, "overflow-y": "auto" }, () => el.getBoundingClientRect().height <= room + 1);
+      push("fixed-offscreen", el, { height: Math.round(r.height), viewportHeight: vh, hidden: Math.round(r.height - room), fits, sticky: true, top: Math.round(top) });
+    };
     for (const el of elements) {
+      if (css(el).position === "sticky") tallSticky(el);
       if (css(el).position !== "fixed") continue;
       if (el.parentElement && el.parentElement !== document.body && insideFixed(el.parentElement)) continue;
       const r = el.getBoundingClientRect();
@@ -910,6 +1549,33 @@
       });
       push("fixed-offscreen", el, { height: Math.round(r.height), viewportHeight: vh, hidden: Math.round(Math.max(below, 0) + Math.max(above, 0)), fits });
     }
+
+    // Bars pinned to the top and bottom of a short screen leave little room
+    // for the page itself (WCAG 1.4.10). Measured scrolled down, where sticky
+    // bars have stuck.
+    const y0 = window.scrollY;
+    const most = root.scrollHeight - vh;
+    if (most > 0) jump(Math.min(most, vh));
+    const stuck = (el, s, r) => s.position === "fixed" || (s.top !== "auto" && Math.abs(r.top - parseFloat(s.top)) < 1.5) || (s.bottom !== "auto" && Math.abs(vh - r.bottom - parseFloat(s.bottom)) < 1.5);
+    const bars = elements.filter((el) => {
+      const s = css(el);
+      if (!/fixed|sticky/.test(s.position) || (el.parentElement && insideFixed(el.parentElement)) || el.matches(MODAL) || dismissible(el)) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width < vw * 0.5 || r.height < 8 || r.height >= vh * 0.9 || r.bottom <= 0 || r.top >= vh || scrollsInside(el)) return false;
+      return stuck(el, s, r);
+    });
+    const spans = bars.map((el) => el.getBoundingClientRect()).map((r) => [Math.max(0, r.top), Math.min(vh, r.bottom)]).sort((a, b) => a[0] - b[0]);
+    let covered = 0;
+    let reach = 0;
+    for (const [a, b] of spans) {
+      covered += Math.max(0, b - Math.max(a, reach));
+      reach = Math.max(reach, b);
+    }
+    if (covered > vh * 0.4) {
+      const tallest = bars.reduce((x, y) => (y.getBoundingClientRect().height > x.getBoundingClientRect().height ? y : x));
+      push("pinned-cover", tallest, { covered: Math.round(covered), viewportHeight: vh, share: Math.round((covered / vh) * 100), bars: bars.length });
+    }
+    jump(y0);
   }
 
   checkOverlays();
@@ -954,6 +1620,42 @@
       // Under 4 px it touches the bar. The fixes leave at least that much.
       const near = contentRight !== -Infinity && gap < 4;
       if (floats || near) push("bar-over-content", el, { right: Math.round(r.right), panelRight: Math.round(panelRight), inset: floats ? inset : 0, edge: Math.round(edge), contentRight: near ? Math.round(contentRight) : 0, gap: near ? Math.max(0, Math.round(gap)) : -1 });
+    }
+
+    // overflow: scroll draws its bar even with nothing to scroll.
+    for (const el of elements) {
+      const s = css(el);
+      if (s.overflowY !== "scroll" && s.overflowX !== "scroll") continue;
+      const ySide = el.offsetWidth - el.clientWidth - parseFloat(s.borderLeftWidth) - parseFloat(s.borderRightWidth);
+      const xSide = el.offsetHeight - el.clientHeight - parseFloat(s.borderTopWidth) - parseFloat(s.borderBottomWidth);
+      const y = s.overflowY === "scroll" && ySide > 0 && el.scrollHeight <= el.clientHeight + 1;
+      const x = s.overflowX === "scroll" && xSide > 0 && el.scrollWidth <= el.clientWidth + 1;
+      if ((!y && !x) || decorative(el) || FORM.has(el.tagName)) continue;
+      push("empty-bar", el, { axis: y && x ? "both" : y ? "y" : "x", bar: Math.round(y ? ySide : xSide) });
+    }
+
+    // A box that scrolls only once its content is long enough jumps sideways
+    // when its bar appears, unless the bar's room is reserved.
+    for (const el of elements) {
+      const s = css(el);
+      if (s.overflowY !== "auto" || s.scrollbarGutter !== "auto" || el.clientHeight < 48 || el.scrollHeight > el.clientHeight + 1 || el.scrollHeight < el.clientHeight * 0.5) continue;
+      if (FORM.has(el.tagName) || decorative(el) || el.offsetWidth - el.clientWidth - parseFloat(s.borderLeftWidth) - parseFloat(s.borderRightWidth) > 0) continue;
+      // Only a box held to a height can run out of room.
+      const height = el.getBoundingClientRect().height;
+      const capped = s.maxHeight !== "none" || withStyles(el, { height: "auto", "max-height": "none", flex: "none" }, () => Math.abs(el.getBoundingClientRect().height - height) > 2);
+      if (!capped) continue;
+      const parts = [...el.querySelectorAll("*")].filter((c) => (hasOwnText(c) || c.matches(`svg, img, ${CONTROL}`)) && isVisible(c)).slice(0, 60);
+      if (!parts.length) continue;
+      const at = () => parts.map((c) => c.getBoundingClientRect().left);
+      const before = at();
+      const after = withStyles(el, { "overflow-y": "scroll" }, at);
+      const shift = Math.max(...before.map((v, i) => Math.abs(after[i] - v)));
+      if (shift < 1) continue;
+      const steady = withStyles(el, { "scrollbar-gutter": "stable" }, () => {
+        const still = at();
+        return withStyles(el, { "overflow-y": "scroll" }, () => at().every((v, i) => Math.abs(v - still[i]) < 0.5));
+      });
+      push("gutter-shift", el, { shift: Math.round(shift * 10) / 10, fill: Math.round((el.scrollHeight / el.clientHeight) * 100), steady });
     }
   }
 
@@ -1045,6 +1747,214 @@
         break;
       }
     }
+  }
+
+  // ---------- 13. content stuck under a pinned bar ----------
+
+  // Content that moves with the page sits lowest at the top of the page, so
+  // anything under a top bar there is never seen; the same for a bottom bar
+  // at the end of the page. Content inside a pinned panel never moves at all.
+  {
+    const vh = window.innerHeight;
+    const pinnedOf = (el) => {
+      for (let n = el; n && n !== root; n = n.parentElement) if (/fixed|sticky/.test(css(n).position)) return n;
+      return null;
+    };
+    const scrollsIn = (el) => {
+      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+        if (scrolls(css(n).overflowY) && n.scrollHeight > n.clientHeight + 2) return true;
+      }
+      return false;
+    };
+    const candidates = elements.filter((el) => (el.matches(CONTROL) || hasOwnText(el)) && !el.closest(MODAL) && !decorative(el)).slice(0, 1500);
+    const under = new Map();
+    const look = (end) => {
+      for (const el of candidates) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 4 || r.height < 4) continue;
+        const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+        if (x < 0 || x >= vw || y < 0 || y >= vh) continue;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || el.contains(hit) || hit.contains(el)) continue;
+        const layer = pinnedOf(hit);
+        if (!layer || layer.contains(el) || layer.matches(MODAL) || ignored(layer) || dismissible(layer) || decorative(layer)) continue;
+        const own = pinnedOf(el);
+        const l = layer.getBoundingClientRect();
+        const top = l.top + l.height / 2 < vh / 2;
+        if (own ? end === "bottom" : (end === "top") !== top) continue;
+        if (scrollsIn(el)) continue;
+        const list = under.get(layer) ?? [];
+        if (!list.some((other) => other.contains(el) || el.contains(other))) list.push(el);
+        under.set(layer, list);
+      }
+    };
+    const y0 = window.scrollY;
+    jump(0);
+    look("top");
+    const most = root.scrollHeight - vh;
+    if (most > 1) {
+      jump(most);
+      look("bottom");
+    }
+    jump(y0);
+    for (const [layer, list] of under) {
+      const l = layer.getBoundingClientRect();
+      for (const el of list.slice(0, 3)) {
+        push("covered-by-pinned", el, { layer: labelFor(layer), layerSelector: selectorFor(layer), position: css(layer).position, side: l.top + l.height / 2 < vh / 2 ? "top" : "bottom", height: Math.round(l.height), count: list.length });
+      }
+    }
+  }
+
+  // ---------- 14. sticky elements with no room to stick ----------
+
+  // A grid or flex row stretches its items to the row's height, so a sticky
+  // sidebar fills its parent and has nowhere to move: it scrolls away.
+  for (const el of elements) {
+    const s = css(el);
+    if (s.position !== "sticky" || (s.top === "auto" && s.bottom === "auto")) continue;
+    const p = el.parentElement;
+    if (!p || p === document.body || el.getBoundingClientRect().height < 8 || decorative(el)) continue;
+    const ps = css(p);
+    const room = () => {
+      const c = p.getBoundingClientRect();
+      const k = el.getBoundingClientRect();
+      const ks = css(el);
+      const inner = c.height - parseFloat(ps.borderTopWidth) - parseFloat(ps.borderBottomWidth) - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom);
+      return inner - (k.height + parseFloat(ks.marginTop) + parseFloat(ks.marginBottom));
+    };
+    // Only a parent taller than the screen leaves something to scroll past.
+    if (room() > 1 || p.getBoundingClientRect().height <= window.innerHeight + 48) continue;
+    const freed = /flex|grid/.test(ps.display) && withStyles(el, { "align-self": "flex-start" }, () => room() > 48);
+    push("sticky-no-room", el, { height: Math.round(el.getBoundingClientRect().height), parentHeight: Math.round(p.getBoundingClientRect().height), freed, layout: ps.display.includes("grid") ? "grid" : ps.display.includes("flex") ? "flex" : "block" });
+  }
+
+  // ---------- 15. text that runs into the control beside it ----------
+
+  {
+    // What text can collide with: a control, a number (a price, a count) or a badge.
+    const PART = "a[href], button, input:not([type=hidden]), select, summary, [role=button], [role=switch], [role=checkbox], [role=tab]";
+    const solid = (el) => el.matches(PART) || roleFor(el) === "number" || (isSurface(el) && (el.textContent || "").trim().length <= 12);
+    const hasWords = (el) => !el.matches(PART) && Boolean((el.textContent || "").trim()) && textBox(el).right !== -Infinity;
+    const pairs = [];
+    for (const row of elements) {
+      const s = css(row);
+      if (!s.display.includes("flex") || s.flexDirection.startsWith("column") || row.closest("a[href], button, [role=button], summary") || decorative(row)) continue;
+      const kids = [...row.children].filter((c) => isVisible(c) && !/absolute|fixed/.test(css(c).position)).slice(0, 30);
+      for (let i = 1; i < kids.length; i++) {
+        const [a, b] = [kids[i - 1], kids[i]];
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        if (ra.bottom <= rb.top || rb.bottom <= ra.top) continue; // different lines
+        const [text, part] = solid(b) && hasWords(a) ? [a, b] : solid(a) && hasWords(b) ? [b, a] : [];
+        if (!text) continue;
+        const gapNow = () => {
+          const t = textBox(text, shownBox);
+          const p = part.getBoundingClientRect();
+          const rt = text.getBoundingClientRect();
+          // Only where the text and the part share a band of the row.
+          if (t.bottom <= p.top || p.bottom <= t.top) return Infinity;
+          // Wrapped text can reach its content edge on any line, whatever
+          // this copy's line breaks happen to be.
+          const ts = css(text);
+          const lh = parseFloat(ts.lineHeight) || parseFloat(ts.fontSize) * 1.2;
+          const edge = t.bottom - t.top > lh * 1.5
+            ? { left: Math.min(t.left, rt.left + parseFloat(ts.borderLeftWidth) + parseFloat(ts.paddingLeft)), right: Math.max(t.right, rt.right - parseFloat(ts.borderRightWidth) - parseFloat(ts.paddingRight)) }
+            : t;
+          return rt.left < p.left ? p.left - edge.right : edge.left - p.right;
+        };
+        const boxGap = ra.left < rb.left ? rb.left - ra.right : ra.left - rb.right;
+        const gap = gapNow();
+        if (gap >= 4 || boxGap >= 1) continue;
+        const spaced = withStyles(row, { "column-gap": "16px" }, () => gapNow() >= 8);
+        pairs.push([text, part, gap, spaced, false]);
+      }
+    }
+    // Text running under a control laid over it, like a card's menu button.
+    // The layer can be the control itself or a cluster of them (a message's
+    // Reply, Copy and Pin buttons in one positioned bar).
+    for (const part of elements) {
+      if (!/absolute|fixed/.test(css(part).position) || decorative(part)) continue;
+      if (!part.matches(PART)) {
+        const inside = part.querySelectorAll(PART);
+        if (!inside.length || inside.length > 6 || hasOwnText(part)) continue;
+      }
+      const p = part.getBoundingClientRect();
+      const area = surfaceOf(part) ?? part.offsetParent;
+      if (!area || area === document.body || p.width < 8) continue;
+      for (const text of [...area.querySelectorAll("*")].filter((c) => hasOwnText(c) && isVisible(c) && !c.contains(part) && !part.contains(c)).slice(0, 60)) {
+        const overlap = () => {
+          const t = textBox(text, shownBox);
+          return Math.min(Math.min(t.right, p.right) - Math.max(t.left, p.left), Math.min(t.bottom, p.bottom) - Math.max(t.top, p.top));
+        };
+        if (overlap() <= 2) continue;
+        // Text spilling out of its own box is the spill check's finding.
+        if (text.scrollWidth > text.clientWidth + 1 && !hides(css(text).overflowX)) continue;
+        const spaced = withStyles(text, { "padding-inline-end": `${Math.round(p.width + 8)}px` }, () => overlap() <= 0);
+        pairs.push([text, part, -Math.round(overlap()), spaced, true]);
+        break;
+      }
+    }
+    for (const [text, part, gap, spaced, under] of pairs) {
+      push("text-touches-control", text, { part: labelFor(part), gap: Math.round(gap), spaced, under });
+    }
+  }
+
+  // ---------- 16. wrapped rows with uneven spacing ----------
+
+  // justify-content: space-between spreads each line on its own, so a short
+  // last line leaves its items pinned to the far edges.
+  for (const el of elements) {
+    const s = css(el);
+    if (!s.display.includes("flex") || s.flexDirection.startsWith("column") || s.flexWrap === "nowrap" || !/space-(between|around|evenly)/.test(s.justifyContent)) continue;
+    const kids = [...el.children].filter((c) => isVisible(c) && !/absolute|fixed/.test(css(c).position));
+    if (kids.length < 3) continue;
+    const gaps = () => {
+      const lines = [];
+      for (const k of kids.map((c) => c.getBoundingClientRect())) {
+        const line = lines.find((l) => Math.abs(l[0].top - k.top) < 4);
+        line ? line.push(k) : lines.push([k]);
+      }
+      return lines.filter((l) => l.length > 1).map((l) => {
+        const xs = l.sort((a, b) => a.left - b.left);
+        let sum = 0;
+        for (let i = 1; i < xs.length; i++) sum += xs[i].left - xs[i - 1].right;
+        return sum / (xs.length - 1);
+      });
+    };
+    const g = gaps();
+    if (g.length < 2) continue;
+    const [least, most] = [Math.min(...g), Math.max(...g)];
+    if (most <= Math.max(least * 1.5, least + 24)) continue;
+    const even = withStyles(el, { "justify-content": "flex-start", "column-gap": `${Math.max(8, Math.round(least))}px` }, () => {
+      const h = gaps();
+      return h.length > 0 && Math.max(...h) - Math.min(...h) <= 2;
+    });
+    push("uneven-row", el, { lines: g.length, gap: Math.round(least), widest: Math.round(most), items: kids.length, even });
+  }
+
+  // ---------- 17. a lone item stretched across an auto-fit grid ----------
+
+  // repeat(auto-fit, …) collapses the empty tracks (they compute to 0px) and
+  // hands their room to the items, so one search result fills the row.
+  for (const el of elements) {
+    const s = css(el);
+    if (!s.display.includes("grid") || decorative(el)) continue;
+    const tracks = tracksOf(el);
+    const empty = tracks.filter((t) => t === 0).length;
+    if (tracks.length < 2 || !empty) continue;
+    const kids = [...el.children].filter((c) => isVisible(c) && !/absolute|fixed/.test(css(c).position));
+    if (!kids.length) continue;
+    const content = el.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+    const track = (content - (parseFloat(s.columnGap) || 0) * (tracks.length - 1)) / tracks.length;
+    // Only an authored auto-fit collapses tracks for this reason: 0px tracks
+    // from minmax(0, 1fr) gutters are a layout, not a stretch.
+    const template = authored(el, "grid-template-columns").find((v) => /auto-fit/.test(v));
+    if (!template) continue;
+    const widest = () => Math.max(...kids.map((c) => c.getBoundingClientRect().width));
+    const itemWidth = widest();
+    if (itemWidth <= track * 1.8) continue;
+    const fills = withStyles(el, { "grid-template-columns": template.replace(/auto-fit/g, "auto-fill") }, () => widest() <= track * 1.1);
+    push("auto-fit-stretch", el, { items: kids.length, tracks: tracks.length, empty, itemWidth: Math.round(itemWidth), trackWidth: Math.round(track), fills, template });
   }
 
   // What Caliper can't measure: a page that drew nothing, and content sealed

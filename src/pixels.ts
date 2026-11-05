@@ -113,3 +113,63 @@ export function inkIn(shown: Raster, behind: Raster, inverted: Raster, area: Are
   const vanishes = visible < Math.min(12, inked * 0.01);
   return { ink: hex(ink), back: hex(back), contrast: contrast(rgb(ink), rgb(back)), visible: visible / inked, vanishes };
 }
+
+// The most common colour in an area of a screenshot, as [r, g, b].
+export function commonColor(raster: Raster, area: Area): [number, number, number] | null {
+  const { width, height, channels, data } = raster;
+  const counts = new Map<number, number>();
+  for (let y = Math.max(0, area.y); y < Math.min(height, area.y + area.height); y++) {
+    for (let x = Math.max(0, area.x); x < Math.min(width, area.x + area.width); x++) {
+      const at = (y * width + x) * channels;
+      const c = (data[at]! << 16) | (data[at + 1]! << 8) | data[at + 2]!;
+      counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+  }
+  if (!counts.size) return null;
+  const c = [...counts].reduce((best, next) => (next[1] > best[1] ? next : best))[0];
+  return [c >> 16, (c >> 8) & 255, c & 255];
+}
+
+const EDGE = 1.1; // below this contrast, an image's edge can't be told from what is around it
+
+export interface Edge {
+  edges: number; // pixels on the image's outline
+  lost: number; // of those, how many melt into the pixel just outside
+}
+
+// Where an image meets what is around it. A pixel of the image (one that
+// changes when the image is inverted) is on its outline when the pixel two
+// steps away is not part of the image. Its edge is lost when it has almost
+// no contrast with that outside pixel, as shown on screen: a white photo on
+// a white page, with no change of hue either. A ring drawn over the edge (an outline, an inset shadow, a
+// border layer) changes the shown pixels, so it counts as an edge.
+export function edgeOf(shown: Raster, inverted: Raster, area: Area): Edge {
+  const { width, height, channels } = shown;
+  const at = (x: number, y: number) => (y * width + x) * channels;
+  const inImage = (x: number, y: number) => {
+    if (x < area.x || y < area.y || x >= area.x + area.width || y >= area.y + area.height || x < 0 || y < 0 || x >= width || y >= height) return false;
+    const i = at(x, y);
+    return shown.data[i] !== inverted.data[i] || shown.data[i + 1] !== inverted.data[i + 1] || shown.data[i + 2] !== inverted.data[i + 2];
+  };
+  const pixel = (x: number, y: number) => {
+    const i = at(Math.min(width - 1, Math.max(0, x)), Math.min(height - 1, Math.max(0, y)));
+    return [shown.data[i]!, shown.data[i + 1]!, shown.data[i + 2]!];
+  };
+  let edges = 0;
+  let lost = 0;
+  for (let y = Math.max(0, area.y); y < Math.min(height, area.y + area.height); y++) {
+    for (let x = Math.max(0, area.x); x < Math.min(width, area.x + area.width); x++) {
+      if (!inImage(x, y)) continue;
+      const out = ([[2, 0], [-2, 0], [0, 2], [0, -2]] as const).find(([dx, dy]) => !inImage(x + dx, y + dy));
+      if (!out) continue;
+      // Step past any anti-aliased rim to what really sits outside.
+      const [ox, oy] = [x + out[0] * 2, y + out[1] * 2];
+      edges++;
+      // Hue counts as much as lightness: a yellow photo on a pale grey page
+      // has the same luminance and a plain edge.
+      const [a, b] = [pixel(x, y), pixel(ox, oy)];
+      if (contrast(a, b) < EDGE && Math.max(...a.map((v, i) => Math.abs(v - b[i]!))) < 24) lost++;
+    }
+  }
+  return { edges, lost };
+}

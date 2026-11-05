@@ -75,9 +75,9 @@ test("writes a JSON and an HTML report", async () => {
     assert.ok(f.prompt.includes(f.fixes[0].css), `${f.id} prompt is missing its fix`);
   }
   // Fixes follow what the element is: a button never truncates, a card title clamps.
-  const rec = (part: string) => json.findings.find((f: { label: string }) => f.label.includes(part))?.fixes[0].title;
-  assert.equal(rec("f-pay"), "Size to the label, wrap only if it must");
-  assert.equal(rec("f-title"), "Clamp to two lines");
+  const rec = (part: string, rule: string) => json.findings.find((f: { label: string; rule: string }) => f.label.includes(part) && f.rule === rule)?.fixes[0].title;
+  assert.equal(rec("f-pay", "content/label-wrap"), "Size to the label, wrap only if it must");
+  assert.equal(rec("f-title", "content/spill"), "Clamp to two lines");
   const html = await readFile(join(outDir, "index.html"), "utf8");
   assert.match(html, /Caliper report/);
   // Each card offers the three fixes plus "Write your own".

@@ -17,7 +17,7 @@ export async function writeReport(result: RunResult, outDir: string) {
     ...result,
     findings: ordered(result.findings).map((f) => {
       const rule = RULES[f.rule];
-      const rec = recommend(rule, f.role);
+      const rec = recommend(rule, f.role, f.fixes);
       return {
         ...f,
         title: rule.title,
@@ -77,7 +77,7 @@ function html(result: RunResult): string {
 
   const card = (f: Finding) => {
     const rule = RULES[f.rule];
-    const rec = recommend(rule, f.role);
+    const rec = recommend(rule, f.role, f.fixes);
     const where = [...f.scenarios.map((s) => label.get(s) ?? s), ...(f.state ? [f.state] : [])];
     // The role only shows where it picked the fix.
     const kicker = ["roles" in rule && f.role !== "box" ? ROLE_NAMES[f.role][0]!.toUpperCase() + ROLE_NAMES[f.role].slice(1) : "", where.join(", ")].filter(Boolean).join(" · ");
@@ -138,7 +138,7 @@ function html(result: RunResult): string {
   const data = JSON.stringify(
     Object.fromEntries(
       findings.map((f) => {
-        const rec = recommend(RULES[f.rule], f.role);
+        const rec = recommend(RULES[f.rule], f.role, f.fixes);
         return [f.id, { ...promptParts(result, f), fixes: rec.fixes.map(fixText), css: rec.fixes.map((x) => x.css), titles: rec.fixes.map((x) => x.title), whens: rec.fixes.map((x) => x.when) }];
       }),
     ),
