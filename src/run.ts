@@ -647,9 +647,10 @@ export async function run(options: RunOptions): Promise<RunResult> {
         return at;
       };
       for (const { selector } of targets) {
-        if (!(await turn(selector, false))) continue;
+        // chainEnd always runs: it puts the panel and the page back where they were.
+        const reached = await turn(selector, false);
         const first = await probeIn<{ moved: boolean }>(page, scenario, { op: "chainEnd", selector });
-        if (!first.moved) continue;
+        if (!reached || !first.moved) continue;
         await turn(selector, true);
         const second = await probeIn<{ moved: boolean }>(page, scenario, { op: "chainEnd", selector });
         const seen = await probeIn<Seen<RawFinding>>(page, scenario, { op: "chainEnd", selector, report: true, contained: !second.moved });

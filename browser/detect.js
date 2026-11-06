@@ -9,6 +9,9 @@
 // for the interaction pass (src/interact.ts), instead of measuring everything.
 ({ checkTapTargets, checkLabels, checkFixed, checkBars, checkWords, ignore, probe }) => {
   if (!document.body) return { findings: [], images: [], pageWidth: 0, pageHeight: 0, viewportWidth: 0 };
+  // A trial that shrinks the page can clamp the scroll position: the full
+  // measurement puts it back where it found it.
+  const startScroll = [window.scrollX, window.scrollY];
   const MAX_PER_KIND = 25;
   const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "HEAD", "META", "LINK", "BR", "OPTION"]);
   const root = document.documentElement;
@@ -392,13 +395,23 @@
 
   // Change some inline styles, measure, and put them back exactly as they
   // were, priority included, so one check can't affect the next.
-  const withStyles = (el, styles, measure) => {
-    const saved = Object.keys(styles).map((k) => [k, el.style.getPropertyValue(k), el.style.getPropertyPriority(k)]);
+  // Put on temporary styles, and take them off exactly: the old values with
+  // their priority, and no empty style attribute left behind.
+  const wear = (el, styles) => {
+    const saved = { bare: !el.hasAttribute("style"), list: Object.keys(styles).map((k) => [k, el.style.getPropertyValue(k), el.style.getPropertyPriority(k)]) };
     for (const [k, v] of Object.entries(styles)) el.style.setProperty(k, v, "important");
+    return saved;
+  };
+  const unwear = (el, saved) => {
+    for (const [k, v, prio] of saved.list) v ? el.style.setProperty(k, v, prio) : el.style.removeProperty(k);
+    if (saved.bare && el.getAttribute("style") === "") el.removeAttribute("style");
+  };
+  const withStyles = (el, styles, measure) => {
+    const saved = wear(el, styles);
     try {
       return measure();
     } finally {
-      for (const [k, v, prio] of saved) v ? el.style.setProperty(k, v, prio) : el.style.removeProperty(k);
+      unwear(el, saved);
     }
   };
 
@@ -697,14 +710,13 @@
     // Hide or invert every image for one screenshot, and put them back.
     mediaStyle: ({ look }) => {
       const worn = (globalThis.__caliperWorn ??= new Map());
-      for (const [el, saved] of worn) for (const [k, v, prio] of saved) v ? el.style.setProperty(k, v, prio) : el.style.removeProperty(k);
+      for (const [el, saved] of worn) unwear(el, saved);
       worn.clear();
       if (!look) return true;
       for (const el of globalThis.__caliperMedia ?? []) {
         const filter = css(el).filter;
         const styles = { transition: "none", animation: "none", ...(look === "hide" ? { visibility: "hidden" } : { filter: `${filter === "none" ? "" : `${filter} `}invert(1)` }) };
-        worn.set(el, Object.keys(styles).map((k) => [k, el.style.getPropertyValue(k), el.style.getPropertyPriority(k)]));
-        for (const [k, v] of Object.entries(styles)) el.style.setProperty(k, v, "important");
+        worn.set(el, wear(el, styles));
       }
       return true;
     },
@@ -818,7 +830,15 @@
             let els = [];
             try { els = [...document.querySelectorAll(rule.selectorText.replace(PSEUDO, "") || "*")].slice(0, 50); } catch { continue; }
             // Decorative icons count too: an unset fill hides them all the same.
-            const el = els.find((e) => drawn.has(e) && !css(e).getPropertyValue(name).trim());
+            // And only where this declaration is the one in effect: setting the
+            // variable must change the property, or a later rule overrides it.
+            const pseudo = rule.selectorText.match(/::?(before|after|placeholder|marker)\b/)?.[0] ?? null;
+            const read = (e) => getComputedStyle(e, pseudo).getPropertyValue(prop);
+            const live = (e) => {
+              const was = read(e);
+              return ["1px", "red", "0", "2", "none", "auto", "10%", "block"].some((v) => withStyles(e, { [name]: v }, () => read(e) !== was));
+            };
+            const el = els.find((e) => drawn.has(e) && !css(e).getPropertyValue(name).trim() && live(e));
             if (!el) continue;
             reported.add(key);
             push("var-unresolved", el, { variable: name, property: prop, rule: rule.selectorText.slice(0, 120) });
@@ -891,13 +911,11 @@
     // Hide the listed text for one screenshot, and put it back.
     textStyle: ({ hide }) => {
       const worn = (globalThis.__caliperTextWorn ??= new Map());
-      for (const [el, saved] of worn) for (const [k, v, prio] of saved) v ? el.style.setProperty(k, v, prio) : el.style.removeProperty(k);
+      for (const [el, saved] of worn) unwear(el, saved);
       worn.clear();
       if (!hide) return true;
       for (const el of globalThis.__caliperTexts ?? []) {
-        const styles = { color: "transparent", "-webkit-text-fill-color": "transparent", "text-decoration-color": "transparent", transition: "none" };
-        worn.set(el, Object.keys(styles).map((k) => [k, el.style.getPropertyValue(k), el.style.getPropertyPriority(k)]));
-        for (const [k, v] of Object.entries(styles)) el.style.setProperty(k, v, "important");
+        worn.set(el, wear(el, { color: "transparent", "-webkit-text-fill-color": "transparent", "text-decoration-color": "transparent", transition: "none" }));
       }
       return true;
     },
@@ -921,8 +939,7 @@
     chainStart: ({ selector, contain }) => {
       const el = document.querySelector(selector);
       if (!el) return null;
-      globalThis.__caliperChain = { y: window.scrollY, top: el.scrollTop, overscroll: [el.style.getPropertyValue("overscroll-behavior-y"), el.style.getPropertyPriority("overscroll-behavior-y")] };
-      if (contain) el.style.setProperty("overscroll-behavior-y", "contain", "important");
+      globalThis.__caliperChain = { y: window.scrollY, top: el.scrollTop, worn: contain ? wear(el, { "overscroll-behavior-y": "contain" }) : null };
       jump(0);
       el.scrollTop = el.scrollHeight;
       const r = el.getBoundingClientRect();
@@ -935,8 +952,8 @@
       const moved = window.scrollY > 0;
       const saved = globalThis.__caliperChain;
       if (el && saved) {
-        const [v, prio] = saved.overscroll;
-        v ? el.style.setProperty("overscroll-behavior-y", v, prio) : el.style.removeProperty("overscroll-behavior-y");
+        if (saved.worn) unwear(el, saved.worn);
+        globalThis.__caliperChain = null;
         el.scrollTop = saved.top;
         jump(saved.y);
       }
@@ -1973,5 +1990,6 @@
   // Kinds that hit the per-kind limit: the report says more may exist.
   // Page overflow is one card per scenario anyway, so its cap hides nothing.
   const capped = [...new Set(findings.map((f) => f.kind))].filter((k) => k !== "page-overflow" && findings.filter((f) => f.kind === k).length >= MAX_PER_KIND);
+  if (window.scrollX !== startScroll[0] || window.scrollY !== startScroll[1]) window.scrollTo({ left: startScroll[0], top: startScroll[1], behavior: "instant" });
   return { findings, images, capped, empty, unseen, pageWidth: root.scrollWidth, pageHeight: root.scrollHeight, viewportWidth: vw };
 };

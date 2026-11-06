@@ -211,6 +211,7 @@ for (const [rule, fail, pass, scenarios] of [
   ["input/short-button", "short-button-fail", "short-button-pass", []],
   ["css/var-unresolved", "var-chat-fail", "var-chat-pass", []],
   ["css/var-unresolved", "var-icon-fail", "var-chat-pass", []],
+  ["css/var-unresolved", "var-chat-fail", "var-override-pass", []],
   ["css/dropped-rule", "vendor-group-fail", "vendor-group-pass", []],
   ["scroll/chains-to-page", "chain-fail", "chain-pass", []],
   ["scroll/gutter-shift", "gutter-shift-fail", "gutter-shift-pass", []],
