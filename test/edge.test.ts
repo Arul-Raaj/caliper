@@ -176,6 +176,93 @@ for (const [rule, fail, pass] of [
   });
 }
 
+// The newer checks, each with the scenario that shows it. The passing page
+// is the same component built the robust way.
+for (const [rule, fail, pass, scenarios] of [
+  ["layout/uneven-row-spacing", "row-uneven-fail", "row-uneven-pass", []],
+  ["layout/stretched-shape", "shape-stretched-fail", "shape-stretched-pass", []],
+  ["layout/stretched-shape", "shape-svg-stretched-fail", "shape-stretched-pass", ["narrow"]],
+  ["layout/text-touches-control", "text-touch-fail", "text-touch-pass", ["narrow"]],
+  ["layout/text-touches-control", "text-under-menu-fail", "text-touch-pass", ["long-text"]],
+  ["layout/text-touches-control", "var-chat-fail", "var-chat-pass", []],
+  ["layout/flex-min-size", "flex-chips-fail", "flex-chips-pass", ["narrow"]],
+  ["layout/flex-min-size", "flex-column-fail", "flex-min-pass", []],
+  ["layout/flex-min-size", "flex-input-fail", "flex-min-pass", ["narrow"]],
+  ["layout/auto-fit-stretch", "autofit-fail", "autofit-pass", []],
+  ["layout/grid-min-size", "grid-fixed-fail", "grid-fixed-pass", ["narrow"]],
+  ["layout/grid-min-size", "grid-code-fail", "grid-code-pass", []],
+  ["layout/sticky-no-room", "sticky-room-fail", "sticky-room-pass", []],
+  ["layout/fixed-offscreen", "sticky-tall-fail", "sticky-tall-pass", ["short-screen"]],
+  ["layout/covered-by-pinned", "var-header-fail", "sticky-tall-pass", []],
+  ["layout/pinned-cover", "bars-cover-fail", "bars-cover-pass", ["short-screen"]],
+  ["layout/fixed-size", "fixed-height-fail", "fixed-sizes-pass", ["long-text"]],
+  ["layout/fixed-width", "fixed-width-fail", "fixed-sizes-pass", ["narrow"]],
+  ["media/distortion", "bg-size-fail", "img-cover-pass", []],
+  ["media/distortion", "img-thumb-fail", "img-svg-pass", []],
+  ["media/wider-than-box", "img-wide-fail", "img-wide-pass", []],
+  ["media/wider-than-box", "img-card-fail", "img-wide-pass", []],
+  ["media/bg-tiles", "bg-tile-fail", "bg-tile-pass", []],
+  ["media/bg-tiles", "bg-mark-fail", "bg-tile-pass", []],
+  ["content/unreadable-without-image", "text-photo-fail", "text-photo-pass", ["broken-images"]],
+  ["content/unreadable-without-image", "text-caption-fail", "text-photo-pass", ["broken-images"]],
+  ["media/edge-lost", "edge-white-fail", "edge-ring-pass", []],
+  ["media/invisible-on-background", "logo-white-fail", "edge-outline-pass", []],
+  ["content/clip", "pill-clip-fail", "pill-clip-pass", ["long-text"]],
+  ["input/short-button", "short-button-fail", "short-button-pass", []],
+  ["css/var-unresolved", "var-chat-fail", "var-chat-pass", []],
+  ["css/var-unresolved", "var-icon-fail", "var-chat-pass", []],
+  ["css/var-unresolved", "var-chat-fail", "var-override-pass", []],
+  ["css/dropped-rule", "vendor-group-fail", "vendor-group-pass", []],
+  ["scroll/chains-to-page", "chain-fail", "chain-pass", []],
+  ["scroll/gutter-shift", "gutter-shift-fail", "gutter-shift-pass", []],
+  ["scroll/empty-bar", "empty-bar-fail", "empty-bar-pass", []],
+  ["hover/sticks-on-touch", "touch-hover-fail", "touch-hover-pass", ["narrow"]],
+  ["input/focus-zoom", "zoom-field-fail", "zoom-field-pass", ["narrow"]],
+] as const) {
+  test(`${rule} fires on ${fail}`, async () => {
+    const r = await check(fail, [...scenarios]);
+    assert.ok(hasRule(r, rule), JSON.stringify(rules(r)));
+  });
+  test(`${rule} stays quiet on ${pass}`, async () => {
+    const r = await check(pass, [...scenarios]);
+    assert.deepEqual(r.findings.filter((f) => f.rule === rule).map((f) => f.evidence), []);
+  });
+}
+
+test("chips that can wrap get the wrap fix first, tested in the page", async () => {
+  const f = hasRule(await check("flex-chips-fail", ["narrow"]), "layout/flex-min-size");
+  assert.equal(recommend(RULES[f!.rule], f!.role, f!.fixes).fixes[0].title, "Let the row wrap");
+});
+
+test("a column item that won't shrink is traced to min-height", async () => {
+  const f = hasRule(await check("flex-column-fail", []), "layout/flex-min-size");
+  assert.match(f!.cause!.text, /min-height/);
+  assert.equal(f!.fixes?.[0]?.title, "Let the item shrink");
+});
+
+test("fixed grid columns get a breakpoint from their measured width", async () => {
+  const f = hasRule(await check("grid-fixed-fail", ["narrow"]), "layout/grid-min-size");
+  assert.equal(f!.fixes?.[0]?.title, "Stack the columns on small screens");
+  assert.match(f!.fixes![0]!.css, /@media \(max-width: \d+px\)/);
+});
+
+test("a name pushed out of a fixed-width pill is cut by the pill", async () => {
+  const f = hasRule(await check("pill-clip-fail", ["long-text"]), "content/clip");
+  assert.match(f!.label, /span "Marta/);
+  assert.match(f!.evidence, /div\.account/);
+});
+
+test("a round SVG avatar stretched by its row is a stretched shape, not a distorted image", async () => {
+  const r = await check("shape-svg-stretched-fail", ["narrow"]);
+  assert.equal(hasRule(r, "media/distortion"), undefined);
+  assert.match(hasRule(r, "layout/stretched-shape")!.label, /img/);
+});
+
+test("a header that covers the first heading gives padding from its own height", async () => {
+  const f = hasRule(await check("var-header-fail", []), "layout/covered-by-pinned");
+  assert.match(f!.fixes?.[0]?.css ?? "", /padding-top: \d+px|scroll-padding-top: \d+px/);
+});
+
 test("a scrollbar at 383 px with content at 383 px in a 400 px panel is measured", async () => {
   const f = hasRule(await check("bar-over-content-fail", []), "scroll/bar-over-content");
   assert.match(f!.evidence, /right edge is at 383 px, 17 px inside its 400 px panel/);

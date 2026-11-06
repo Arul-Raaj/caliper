@@ -1,0 +1,41 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #1d232b; background: #f6f7f9; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 24px; margin: 0 0 16px; }
+  h2, h3, p { margin: 0; }
+  button { font: inherit; }
+</style>
+<title>Rows with spacing</title>
+<style>
+  .section__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .section__title { flex: 1; min-width: 0; font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .section__more { color: #1f4f8b; font-weight: 500; text-decoration: none; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .tiles div { height: 80px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .card { position: relative; padding: 16px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; max-width: 360px; }
+  .card h3 { font-size: 16px; }
+  .card p { color: #55606c; margin-top: 4px; }
+  .card__menu { position: absolute; top: 12px; right: 12px; width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #55606c; cursor: pointer; }
+  .settings { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .setting { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid #e3e6ea; }
+  .setting:first-child { border-top: 0; }
+  .switch { flex: none; width: 44px; height: 24px; padding: 0; border: 0; border-radius: 12px; background: #1f4f8b; position: relative; }
+  .switch::after { content: ""; position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+  .switch[aria-checked=false] { background: #c8ced6; }
+  .switch[aria-checked=false]::after { right: auto; left: 3px; }
+  .products { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-width: 420px; }
+  .product { display: flex; justify-content: space-between; padding: 12px 16px; background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; }
+  .product__price { font-weight: 600; }
+  .section__header, .setting, .product { gap: 16px; } .card h3 { padding-right: 40px; }
+</style></head><body><main>
+<h1>Home</h1>
+<section aria-labelledby="s1"><div class="section__header"><h2 class="section__title" id="s1">Recommended for you based on your recent orders</h2><a class="section__more" href="#">See all</a></div><div class="tiles"><div></div><div></div><div></div></div></section>
+<h1 style="margin-top:24px">Documents</h1>
+<article class="card"><h3>Quarterly planning notes</h3><p>Edited 2 hours ago</p><button class="card__menu" aria-label="More actions"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="3" r="1.6" fill="currentColor"/><circle cx="9" cy="9" r="1.6" fill="currentColor"/><circle cx="9" cy="15" r="1.6" fill="currentColor"/></svg></button></article>
+<h1 style="margin-top:24px">Notifications</h1>
+<ul class="settings"><li class="setting"><span id="l1">Show my status to teammates</span><button class="switch" role="switch" aria-checked="true" aria-labelledby="l1"></button></li><li class="setting"><span id="l2">Share usage data to improve search</span><button class="switch" role="switch" aria-checked="false" aria-labelledby="l2"></button></li></ul>
+<h1 style="margin-top:24px">Order summary</h1>
+<ul class="products"><li class="product"><span class="product__name">Noise cancelling headphones</span><span class="product__price">₹4,999</span></li><li class="product"><span class="product__name">Charging case</span><span class="product__price">₹1,499</span></li></ul>
+</main></body></html>

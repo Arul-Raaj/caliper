@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #1d232b; background: #f6f7f9; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 24px; margin: 0 0 16px; }
+  button { font: inherit; }
+</style>
+<title>Shop: filter chips</title>
+<style>
+  .filters { display: flex; gap: 8px; margin-bottom: 20px; }
+  .chip { white-space: nowrap; padding: 6px 14px; border: 1px solid #c8ced6; border-radius: 999px; background: #fff; color: #1d232b; cursor: pointer; }
+  .chip[aria-pressed=true] { background: #1d232b; color: #fff; border-color: #1d232b; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+  .tile { background: #fff; border: 1px solid #e3e6ea; border-radius: 12px; padding: 16px; min-height: 120px; }
+</style></head><body><main>
+<h1>Running shoes</h1>
+<div class="filters" role="group" aria-label="Filter products">
+  <button class="chip" aria-pressed="true">All</button>
+  <button class="chip" aria-pressed="false">Road</button>
+  <button class="chip" aria-pressed="false">Trail</button>
+  <button class="chip" aria-pressed="false">Waterproof</button>
+  <button class="chip" aria-pressed="false">On sale</button>
+  <button class="chip" aria-pressed="false">New arrivals</button>
+  <button class="chip" aria-pressed="false">Wide fit</button>
+</div>
+<div class="grid">
+  <div class="tile">Cloudrunner 4</div><div class="tile">Ridge Trail GTX</div><div class="tile">Tempo Lite</div>
+</div>
+</main></body></html>

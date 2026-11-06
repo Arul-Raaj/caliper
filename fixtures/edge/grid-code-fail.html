@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Blog</title><link rel="stylesheet" href="base.css">
+<style>.post { display: grid; grid-template-columns: 1fr 240px; gap: 32px; }
+pre { background: #111827; color: #e5e7eb; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 14px; }</style></head><body>
+<header class="top"><strong>Blog</strong><a href="#">Posts</a><a href="#">About</a></header>
+<div class="wrap post">
+  <article><h1>Caching fetch calls</h1><p>Wrap the call once and every page reuses the result.</p>
+<pre><code>export async function cachedFetch(url: string, options: RequestInit = {}, ttlSeconds = 300): Promise&lt;Response&gt; { const key = [url, JSON.stringify(options)].join("|"); return memo(key, ttlSeconds, () =&gt; fetch(url, options)); }</code></pre>
+  <p>The key includes the options, so a POST never reads a cached GET.</p></article>
+  <aside class="card"><h3>Related</h3><p>Streaming responses</p><p>Retry with backoff</p></aside>
+</div></body></html>

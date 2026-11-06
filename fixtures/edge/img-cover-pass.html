@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Trips</title>
+<style>
+body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#f7f7f5;color:#1b1b1b}
+main{max-width:1040px;margin:0 auto;padding:32px 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
+.card{background:#fff;border:1px solid #e3e3e0;border-radius:12px;overflow:hidden}
+.card__thumb{display:block;width:100%;height:180px;object-fit:cover}
+.card__body{padding:12px 16px 16px}
+.card__body h2{font-size:18px;margin:0 0 4px}
+.card__body p{margin:0;color:#555}
+.hero img{display:block;width:100%;height:320px;object-fit:cover}
+ul{list-style:none;margin:24px 0 0;padding:0}
+li{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid #eee}
+.avatar{width:48px;height:48px;border-radius:50%;flex:none;object-fit:cover}
+.listing__photo{height:200px;background-size:cover;background-position:center;background-repeat:no-repeat;border-radius:12px}
+</style></head><body>
+<header class="hero"><img src="img/hero-1200x500.png" alt="The studio at dawn"></header>
+<main>
+<h1>Upcoming trips</h1>
+<div class="grid">
+<article class="card"><img class="card__thumb" src="img/portrait-600x900.png" alt="Pine valley"><div class="card__body"><h2>Pine valley</h2><p>Three nights, cabins by the lake.</p></div></article>
+<article class="card"><img class="card__thumb" src="img/landscape-1600x900.png" alt="Ridge walk"><div class="card__body"><h2>Ridge walk</h2><p>A day hike with a picnic at the top.</p></div></article>
+<article class="card"><div class="listing__photo" style="background-image:url(img/wide-2000x600.png)" role="img" aria-label="Coast road"></div><div class="card__body"><h2>Coast road</h2><p>Two days along the cliffs.</p></div></article>
+</div>
+<ul>
+<li><img class="avatar" src="img/avatar-portrait-120x160.png" alt=""><div><strong>Priya N.</strong><p>The second chart answered my question, thanks.</p></div></li>
+</ul></main></body></html>

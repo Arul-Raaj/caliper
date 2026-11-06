@@ -44,7 +44,7 @@ export function ownFixText(text: string): string {
   return `Fix to apply, in my own words: ${text.trim()}`;
 }
 
-export function prompt(result: RunResult, f: Finding, fix: Fix = recommend(RULES[f.rule], f.role).fixes[0]): string {
+export function prompt(result: RunResult, f: Finding, fix: Fix = recommend(RULES[f.rule], f.role, f.fixes).fixes[0]): string {
   const { head, tail } = promptParts(result, f);
   return `${head}${fixText(fix)}\n${tail}`;
 }

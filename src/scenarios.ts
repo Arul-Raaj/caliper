@@ -1,7 +1,7 @@
 // A scenario is one way of stressing the page: a screen size plus,
 // optionally, a change to the content. Each runs in a fresh browser tab.
 
-export type StressMode = "none" | "long-text" | "long-word" | "text-spacing";
+export type StressMode = "none" | "long-text" | "long-word" | "text-spacing" | "short-labels";
 
 export interface Scenario {
   id: string;
@@ -17,6 +17,7 @@ export interface Scenario {
   colorScheme: "light" | "dark";
   media: boolean; // compare pixels to find images that vanish into their background
   interact: "full" | "open" | "none"; // full hovers and tabs; open only opens menus and sheets
+  touch?: boolean; // force hover and focus as a touch screen would: sticky hover, field zoom
 }
 
 const DESKTOP = { width: 1280, height: 800 };
@@ -47,6 +48,38 @@ export const SCENARIOS: Scenario[] = [
     stress: "long-text",
     blockImages: false,
     labels: false,
+    checkFixed: false,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
+  },
+  {
+    // The most common real break: a long name in a phone's row.
+    id: "long-text-phone",
+    label: "Text 3x longer on a phone",
+    phrase: "with text 3x longer on a 320 px phone",
+    viewport: { width: 320, height: 640 },
+    deviceScaleFactor: 2,
+    mobile: true,
+    stress: "long-text",
+    blockImages: false,
+    labels: false,
+    checkFixed: false,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
+  },
+  {
+    // A translation can be much shorter, too: "OK", "Go", "Ja".
+    id: "short-labels",
+    label: "Short button labels",
+    phrase: "with short button labels",
+    viewport: DESKTOP,
+    deviceScaleFactor: 1,
+    mobile: false,
+    stress: "short-labels",
+    blockImages: false,
+    labels: true,
     checkFixed: false,
     colorScheme: "light",
     media: false,
@@ -96,6 +129,24 @@ export const SCENARIOS: Scenario[] = [
     colorScheme: "light",
     media: false,
     interact: "open",
+    touch: true,
+  },
+  {
+    // Wide enough to keep desktop sidebars and sticky bars, but short: where
+    // pinned bars and tall sticky panels run out of room.
+    id: "short-screen",
+    label: "Phone held sideways",
+    phrase: "on a phone held sideways (844 × 390)",
+    viewport: { width: 844, height: 390 },
+    deviceScaleFactor: 2,
+    mobile: true,
+    stress: "none",
+    blockImages: false,
+    labels: true,
+    checkFixed: true,
+    colorScheme: "light",
+    media: false,
+    interact: "none",
   },
   {
     // A 1280 x 800 window at 200% browser zoom lays out exactly like a

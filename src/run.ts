@@ -3,21 +3,27 @@
 
 import { mkdir } from "node:fs/promises";
 import type { Browser, BrowserContext, Page } from "playwright";
-import { RULES, type Role, type RuleId } from "./rules.js";
+import { RULES, type Fixes, type Role, type RuleId } from "./rules.js";
+import { fixesFor } from "./fixes.js";
 import { SCENARIOS, widthScenario, type Scenario } from "./scenarios.js";
 import { loadScript } from "./scripts.js";
 import { launchBrowser } from "./browser.js";
 import { inPage } from "./page.js";
 import { exercise, pattern, type Seen } from "./interact.js";
-import { decodePng, inkIn } from "./pixels.js";
+import { commonColor, contrast, decodePng, edgeOf, inkIn } from "./pixels.js";
 import type { ScriptedState } from "./steps.js";
 
 // ---------- types ----------
 
 interface Box { x: number; y: number; width: number; height: number }
 
-interface RawFinding {
-  kind: "page-overflow" | "spill-x" | "clip-x" | "flex-shrink" | "grid-blowout" | "fixed-height" | "img-distorted" | "tap-small" | "label-wrap" | "label-truncated" | "fixed-offscreen" | "bar-over-content" | "control-past" | "hover-hug" | "overlay-offscreen-x" | "no-focus-ring" | "word-broken" | "invisible-media";
+export interface RawFinding {
+  kind:
+    | "page-overflow" | "spill-x" | "clip-x" | "flex-shrink" | "flex-column" | "fixed-width" | "grid-blowout" | "fixed-height" | "img-distorted"
+    | "tap-small" | "label-wrap" | "label-truncated" | "short-button" | "fixed-offscreen" | "pinned-cover" | "covered-by-pinned" | "sticky-no-room"
+    | "bar-over-content" | "empty-bar" | "gutter-shift" | "chains-to-page" | "control-past" | "text-touches-control" | "uneven-row" | "auto-fit-stretch"
+    | "stretched-shape" | "wider-than-box" | "bg-tiles" | "edge-lost" | "unreadable-without-image" | "hover-hug" | "sticks-on-touch" | "focus-zoom"
+    | "overlay-offscreen-x" | "no-focus-ring" | "word-broken" | "invisible-media" | "var-unresolved" | "dropped-rule";
   selector: string;
   label: string;
   role: Role;
@@ -45,6 +51,7 @@ export interface Finding {
   state?: string; // the opened state it needed, such as "with button "Menu" open"
   shots: { before?: string; after?: string; missing?: "limit" | "failed" }; // why there is no screenshot
   similar: { selector: string; label: string }[]; // other elements with the same structure and the same problem
+  fixes?: Fixes; // fixes built from what was measured, recommended first; otherwise the rule's own
 }
 
 export interface RunOptions {
@@ -106,6 +113,27 @@ function toRule(raw: RawFinding, scenario: Scenario): RuleId {
   switch (raw.kind) {
     case "page-overflow": return "layout/page-overflow";
     case "flex-shrink": return "layout/flex-min-size";
+    case "flex-column": return "layout/flex-min-size";
+    case "fixed-width": return "layout/fixed-width";
+    case "short-button": return "input/short-button";
+    case "pinned-cover": return "layout/pinned-cover";
+    case "covered-by-pinned": return "layout/covered-by-pinned";
+    case "sticky-no-room": return "layout/sticky-no-room";
+    case "empty-bar": return "scroll/empty-bar";
+    case "gutter-shift": return "scroll/gutter-shift";
+    case "chains-to-page": return "scroll/chains-to-page";
+    case "text-touches-control": return "layout/text-touches-control";
+    case "uneven-row": return "layout/uneven-row-spacing";
+    case "auto-fit-stretch": return "layout/auto-fit-stretch";
+    case "stretched-shape": return "layout/stretched-shape";
+    case "wider-than-box": return "media/wider-than-box";
+    case "bg-tiles": return "media/bg-tiles";
+    case "edge-lost": return "media/edge-lost";
+    case "unreadable-without-image": return "content/unreadable-without-image";
+    case "sticks-on-touch": return "hover/sticks-on-touch";
+    case "focus-zoom": return "input/focus-zoom";
+    case "var-unresolved": return "css/var-unresolved";
+    case "dropped-rule": return "css/dropped-rule";
     case "grid-blowout": return "layout/grid-min-size";
     case "fixed-height": return "layout/fixed-size";
     case "img-distorted": return "media/distortion";
@@ -131,38 +159,96 @@ function evidence(raw: RawFinding, scenario: Scenario): string {
   const d = raw.details;
   switch (raw.kind) {
     case "page-overflow":
-      return `The page is ${d.pageWidth} px wide on a ${d.viewportWidth} px screen.${d.right ? ` This element reaches ${d.right} px.` : ""}`;
+      return `The page is ${d.pageWidth} px wide on a ${d.viewportWidth} px screen.${d.right ? ` This element reaches ${d.right} px.` : ""}${d.width ? ` Its width is set to ${d.width}.` : ""}`;
     case "spill-x":
       return `Its text needs ${d.contentWidth} px; the box gives ${d.boxWidth} px. ${d.gap} px runs past the edge.`;
     case "clip-x":
-      return `Its text needs ${d.contentWidth} px; ${d.boxWidth} px is shown. ${d.gap} px is hidden, with no ellipsis.`;
+      return d.by
+        ? `Its text needs ${d.contentWidth} px; ${d.by} shows ${d.boxWidth} px of it. ${d.gap} px is hidden, with no ellipsis.`
+        : `Its text needs ${d.contentWidth} px; ${d.boxWidth} px is shown. ${d.gap} px is hidden, with no ellipsis.`;
     case "flex-shrink":
-      return `Its row needs ${d.contentWidth} px; the row gives ${d.containerWidth} px. This item takes ${d.itemWidth} px.`;
+      return `Its row needs ${d.contentWidth} px; the row gives ${d.containerWidth} px. This item takes ${d.itemWidth} px${d.side === "left" ? ", and the row runs out past its left edge, where nobody can scroll" : ""}.`;
+    case "flex-column":
+      return `Its column has ${d.containerHeight} px of height and needs ${d.contentHeight} px. This item takes ${d.itemHeight} px and won't shrink, so nothing inside it scrolls.`;
+    case "fixed-width":
+      return `Its row needs ${d.contentWidth} px; the row gives ${d.containerWidth} px. This item holds a set ${d.itemWidth} px and won't shrink.`;
     case "grid-blowout":
-      return `The grid needs ${d.contentWidth} px; it has ${d.containerWidth} px.`;
+      return Number(d.fixedSum)
+        ? `The grid needs ${d.contentWidth} px; it has ${d.containerWidth} px. Its fixed columns (${String(d.fixed).split(" ").filter((t) => t !== "flex").join(", ")}) take ${d.fixedSum} px of it.`
+        : `The grid needs ${d.contentWidth} px; it has ${d.containerWidth} px.`;
     case "fixed-height":
       return `Its content needs ${d.contentHeight} px of height; the box gives ${d.boxHeight} px${d.clipped ? ", and the rest is hidden" : ""}.`;
     case "img-distorted":
-      return `The image is ${d.naturalWidth} × ${d.naturalHeight} but shown at ${d.shownWidth} × ${d.shownHeight}, so its shape changes.`;
+      return d.background
+        ? `The background image is ${d.naturalWidth} × ${d.naturalHeight} but drawn at ${d.shownWidth} × ${d.shownHeight}, so its shape changes.`
+        : `The image is ${d.naturalWidth} × ${d.naturalHeight} but shown at ${d.shownWidth} × ${d.shownHeight}, so its shape changes.`;
+    case "stretched-shape":
+      return `On its own it is ${d.ownWidth} × ${d.ownHeight} px; the row stretches it to ${d.width} × ${d.height} px, so its ${d.round ? "circle becomes a pill" : "square becomes a bar"}.`;
+    case "wider-than-box":
+      return `It is ${d.width} px wide in a box with ${d.room} px of room, so ${d.past} px ${d.clipped ? "is cut off" : "runs past the edge"}.`;
+    case "bg-tiles":
+      return Number(d.wideAt)
+        ? `Its background image is ${d.tileWidth} px wide and repeats: on screens wider than ${d.wideAt} px it starts to tile.`
+        : `Its background image is drawn at ${d.tileWidth} × ${d.tileHeight} px in a ${d.areaWidth} × ${d.areaHeight} px box and repeats ${d.axis === "both" ? "both ways" : d.axis === "x" ? "sideways" : "downwards"}, so a second copy shows.`;
+    case "edge-lost":
+      return `${d.lost}% of its outline has under 1.1:1 contrast with what is around it, so its edge disappears.`;
+    case "unreadable-without-image":
+      return `With the image missing, its ${d.color} text sits on ${d.back}, a contrast of ${d.contrast}:1 (it needs ${d.needed}:1).`;
     case "tap-small":
       return `It measures ${d.width} × ${d.height} px on a ${scenario.viewport.width} px screen, with another target within 24 px.`;
     case "label-wrap":
       return `Its label breaks onto ${d.lines} lines in a ${d.width} px button. On one line it needs ${d.needed} px, and the row has ${d.available} px.`;
     case "label-truncated":
       return `Its label needs ${d.contentWidth} px; the button shows ${d.boxWidth} px and ends in an ellipsis.`;
+    case "short-button":
+      return `With the label "${d.text}" it is ${d.width} × ${d.height} px, narrower than 44 px or than it is tall.`;
     case "fixed-offscreen":
-      return `It is ${d.height} px tall on a ${d.viewportHeight} px screen, and ${d.hidden} px of it can't be scrolled into view.`;
+      return d.sticky
+        ? `It sticks at ${d.top} px and is ${d.height} px tall on a ${d.viewportHeight} px screen, so its last ${d.hidden} px only come into view when its container ends.`
+        : `It is ${d.height} px tall on a ${d.viewportHeight} px screen, and ${d.hidden} px of it can't be scrolled into view.`;
+    case "pinned-cover":
+      return `${d.bars === 1 ? "This bar takes" : `${d.bars} pinned bars take`} ${d.covered} px of a ${d.viewportHeight} px screen (${d.share}%), so the page shows through a slot.`;
+    case "covered-by-pinned":
+      return d.side === "top"
+        ? `At the top of the page it sits under ${d.layer} (${d.position}, ${d.height} px tall), and it never scrolls out from under it.`
+        : `At the end of the page it sits under ${d.layer} (${d.position}, ${d.height} px tall), and it never scrolls out from under it.`;
+    case "sticky-no-room":
+      return `It is position: sticky and ${d.height} px tall, and its ${d.layout} parent is exactly as tall (${d.parentHeight} px), so it has no room to stick and scrolls away.`;
     case "bar-over-content": {
       const inset = Number(d.inset) ? `Its right edge is at ${d.right} px, ${d.inset} px inside its ${d.panelRight} px panel.` : "";
       const near = Number(d.gap) >= 0 ? `Its content reaches ${d.contentRight} px, ${d.gap} px from the scrollbar at ${d.edge} px.` : "";
       return [inset, near].filter(Boolean).join(" ");
     }
+    case "empty-bar":
+      return `It draws a ${d.bar} px scrollbar ${d.axis === "both" ? "on both sides" : d.axis === "y" ? "down its side" : "along its bottom"} with nothing to scroll.`;
+    case "gutter-shift":
+      return `Its content fills ${d.fill}% of its height. Once it runs longer, the scrollbar appears and moves the content ${d.shift} px sideways.`;
+    case "chains-to-page":
+      return "Scrolled to its end, one more turn of the wheel scrolls the page behind it.";
     case "control-past":
       return `It runs ${d.past} px past the ${d.side} edge of ${d.container}${d.clipped ? ", which cuts it off" : ""}.`;
+    case "text-touches-control":
+      return d.under
+        ? `Its text runs ${-Number(d.gap)} px under ${d.part}, which is laid over it.`
+        : Number(d.gap) < 0
+          ? `Its text runs ${-Number(d.gap)} px into ${d.part}, with no gap between them.`
+          : `Its text ends ${d.gap} px from ${d.part}, with no gap set between them.`;
+    case "uneven-row":
+      return `Its items wrap onto ${d.lines} lines spaced unevenly: ${d.gap} px between items on one line, ${d.widest} px on another.`;
+    case "auto-fit-stretch":
+      return `It has room for ${d.tracks} columns of ${d.trackWidth} px, but ${d.items === 1 ? "its one item stretches" : `its ${d.items} items stretch`} to ${d.itemWidth} px: ${d.empty} empty ${Number(d.empty) === 1 ? "column collapses" : "columns collapse"}.`;
     case "hover-hug":
       return d.corners
         ? `Its ${d.fill} hover fill has 0 px corners, ${d.inset} px inside a surface with ${d.radius} px corners.`
         : `Its ${d.fill} hover fill leaves ${d.gap} px between its ${d.side} edge and the content.`;
+    case "sticks-on-touch":
+      return d.revealed
+        ? "On a touch screen a tap leaves it in its hover state, and parts that only show on hover appear and stay."
+        : d.change === "fill"
+          ? "On a touch screen a tap leaves its hover fill on, and it stays until you tap somewhere else."
+          : "On a touch screen a tap leaves it lifted in its hover state, and it stays until you tap somewhere else.";
+    case "focus-zoom":
+      return `Its text is ${d.size} px when it has focus. iOS Safari zooms into any field under 16 px, and the page stays zoomed in.`;
     case "overlay-offscreen-x":
       return `It is ${d.width} px wide and runs ${d.past} px past the ${d.side} edge of a ${d.viewportWidth} px screen.`;
     case "no-focus-ring":
@@ -171,6 +257,10 @@ function evidence(raw: RawFinding, scenario: Scenario): string {
       return `"${d.word}" breaks into "${d.head}" and "${d.tail}". The word needs ${d.wordWidth} px; the box gives ${d.room} px.`;
     case "invisible-media":
       return `It is ${d.ink} on ${d.back}, a contrast of ${d.contrast}:1. ${d.visible}% of its pixels stand out from what is behind them.`;
+    case "var-unresolved":
+      return `${d.property} uses var(${d.variable}) with no fallback (in "${d.rule}"), and ${d.variable} isn't set here, so the browser drops the whole value.`;
+    case "dropped-rule":
+      return `The rule "${d.selector}" (${d.sheet}, line ${d.line}) groups ${d.unsupported}, which this browser doesn't know, so it drops the whole rule.`;
   }
 }
 
@@ -189,33 +279,106 @@ function cause(raw: RawFinding): { text: string; confirmed: boolean } | undefine
       return { text: "The box has a fixed or minimum width.", confirmed: false };
     }
     case "clip-x":
+      if (d.by) {
+        return d.reveals
+          ? { text: `${d.by} has overflow: hidden and a set width, and the text can't wrap or end in an ellipsis. Allowed to wrap, all of it shows.`, confirmed: true }
+          : { text: `${d.by} has overflow: hidden, and the text inside it has no ellipsis.`, confirmed: false };
+      }
       return d.reveals
         ? { text: "overflow: hidden on the box, with no text-overflow: ellipsis. Allowed to wrap, all of it shows.", confirmed: true }
         : { text: "overflow: hidden on the box, with no text-overflow: ellipsis.", confirmed: false };
     case "flex-shrink":
-      return d.confirmed
-        ? { text: "Flex items won't shrink below their content (min-width: auto). With min-width: 0 the row fits.", confirmed: true }
-        : { text: "Something inside the row is wider than the row. min-width: 0 alone didn't fix it.", confirmed: false };
+      if (d.confirmed) return { text: "Flex items won't shrink below their content (min-width: auto). With min-width: 0 the row fits, and every item's text stays inside it.", confirmed: true };
+      if (d.wraps) return { text: "The row can't wrap (flex-wrap: nowrap), and its items can't shrink without their text spilling. With flex-wrap: wrap it fits.", confirmed: true };
+      return { text: "Something inside the row is wider than the row. Neither min-width: 0 nor flex-wrap: wrap fixed it.", confirmed: false };
+    case "flex-column":
+      return { text: "Flex items won't shrink below their content height (min-height: auto), so the column grows past its box instead of letting the inside scroll. With min-height: 0 it fits.", confirmed: true };
+    case "fixed-width":
+      return { text: "A set width with flex-shrink: 0 (or flex: none). Allowed to shrink, the row fits.", confirmed: true };
     case "grid-blowout":
+      if (Number(d.fixedSum)) {
+        return d.stacks
+          ? { text: "Its fixed columns are wider than the room a small screen has. Stacked in one column, the grid fits.", confirmed: true }
+          : { text: "Its fixed columns are wider than the room a small screen has.", confirmed: false };
+      }
       return d.confirmed
-        ? { text: "Grid tracks grow to fit their content. With min-width: 0 on the items, the grid fits.", confirmed: true }
+        ? { text: "Grid tracks grow to fit their content. With min-width: 0 on the items, the grid fits and nothing in it pushes the page wider.", confirmed: true }
         : { text: "A child is wider than its track. min-width: 0 alone didn't fix it.", confirmed: false };
     case "fixed-height":
       return { text: "A set height or max-height. Released, the box grows.", confirmed: true };
+    case "img-distorted":
+      if (d.background) return { text: "background-size gives two lengths whose shape isn't the image's own.", confirmed: false };
+      return d.stretched
+        ? { text: "The row stretches it to the row's height (align-items: stretch). With align-self: flex-start it keeps its shape.", confirmed: true }
+        : { text: "The box has a different shape from the image, and object-fit: fill bends the image to fit.", confirmed: false };
+    case "stretched-shape":
+      return { text: "The row stretches it to the row's height (align-items: stretch). With align-self: flex-start it keeps its shape.", confirmed: true };
+    case "wider-than-box":
+      return d.fits
+        ? { text: "Nothing caps it at the width of its box. With max-width: 100% and height: auto it fits.", confirmed: true }
+        : { text: "Nothing caps it at the width of its box.", confirmed: false };
+    case "bg-tiles":
+      return { text: "background-repeat is left at repeat, and the image doesn't cover the box.", confirmed: false };
     case "label-wrap":
       return { text: "Its width is held below its label. Sized to the label, it fits on one line.", confirmed: true };
     case "label-truncated":
       return d.reveals
         ? { text: "text-overflow: ellipsis cuts the label. Allowed to wrap, all of it shows.", confirmed: true }
         : { text: "text-overflow: ellipsis cuts the label.", confirmed: false };
+    case "short-button":
+      return { text: "The button has no min-width, so it is only as wide as its label and padding.", confirmed: false };
     case "fixed-offscreen":
+      if (d.sticky) {
+        return d.fits
+          ? { text: "position: sticky with no max-height or scrolling. With a max-height of the screen minus its offset, it fits.", confirmed: true }
+          : { text: "position: sticky with no max-height or scrolling.", confirmed: false };
+      }
       return d.fits
         ? { text: "position: fixed with no max-height or scrolling. With max-height: 100dvh it fits.", confirmed: true }
         : { text: "position: fixed with no max-height or scrolling.", confirmed: false };
+    case "pinned-cover":
+      return { text: "Bars stay pinned whatever the screen's height. Nothing unpins them on short screens.", confirmed: false };
+    case "covered-by-pinned":
+      return { text: "The bar is taken out of the page's flow, and nothing makes room for it (a padding, a margin, or a variable that should set one).", confirmed: false };
+    case "sticky-no-room":
+      return d.freed
+        ? { text: `The ${d.layout} stretches it to its parent's height (align-items: stretch). With align-self: flex-start it has room to stick.`, confirmed: true }
+        : { text: "Its parent is exactly as tall as it is, so it has no room to move.", confirmed: false };
+    case "empty-bar":
+      return { text: "overflow: scroll draws a scrollbar whether there is anything to scroll or not.", confirmed: false };
+    case "gutter-shift":
+      return d.steady
+        ? { text: "overflow: auto takes room for the scrollbar only once it appears. With scrollbar-gutter: stable nothing moves.", confirmed: true }
+        : { text: "overflow: auto takes room for the scrollbar only once it appears.", confirmed: false };
+    case "chains-to-page":
+      return d.contained
+        ? { text: "overscroll-behavior is left at auto, so scrolling past the end is passed on. With overscroll-behavior: contain the page stays still.", confirmed: true }
+        : { text: "overscroll-behavior is left at auto, so scrolling past the end is passed on.", confirmed: false };
     case "control-past":
       return d.shrinks
         ? { text: "The items in its row won't shrink below their content (min-width: auto). With min-width: 0 it stays inside.", confirmed: true }
         : { text: "Its row is wider than its container. min-width: 0 alone didn't bring it back.", confirmed: false };
+    case "text-touches-control":
+      if (d.under) {
+        return d.spaced
+          ? { text: "The control is laid over the text, and the text keeps no room for it. With padding the width of the control, the text stays clear.", confirmed: true }
+          : { text: "The control is laid over the text, and the text keeps no room for it.", confirmed: false };
+      }
+      return d.spaced
+        ? { text: "The row sets no gap, so the text grows right up to its neighbour. With column-gap: 16px they stay apart.", confirmed: true }
+        : { text: "The row sets no gap, so the text grows right up to its neighbour.", confirmed: false };
+    case "uneven-row":
+      return d.even
+        ? { text: "justify-content spreads each line on its own, so a short line spreads wide. Packed to the start with a gap, every line matches.", confirmed: true }
+        : { text: "justify-content spreads each line on its own, so a short line spreads wide.", confirmed: false };
+    case "auto-fit-stretch":
+      return d.fills
+        ? { text: `${d.template} collapses the empty columns and gives their room to the items. With auto-fill they keep their width.`, confirmed: true }
+        : { text: "repeat(auto-fit, …) collapses the empty columns and gives their room to the items.", confirmed: false };
+    case "sticks-on-touch":
+      return { text: "A :hover rule outside @media (hover: hover). Touch screens apply it on tap and keep it.", confirmed: true };
+    case "focus-zoom":
+      return { text: "The field's font-size is under 16 px.", confirmed: true };
     case "no-focus-ring":
       return d.reverts
         ? { text: "A style removes the outline and puts nothing in its place. With outline: revert the ring comes back.", confirmed: true }
@@ -225,9 +388,14 @@ function cause(raw: RawFinding): { text: string; confirmed: boolean } | undefine
         ? { text: "overflow-wrap or word-break lets the box shrink below the word. Set back to normal, the word stays whole.", confirmed: true }
         : { text: "overflow-wrap or word-break lets the word break, and the box has no room for it whole.", confirmed: false };
     case "page-overflow":
+      if (d.right && d.fits) return { text: d.width ? `A set width of ${d.width}. With max-width: 100% the page fits.` : "Nothing caps this element at the screen's width. With max-width: 100% the page fits.", confirmed: true };
       return d.right
         ? { text: "This element reaches furthest past the edge.", confirmed: false }
         : { text: "Something with no element of its own runs past the edge, such as a ::before or ::after layer.", confirmed: false };
+    case "var-unresolved":
+      return { text: `var(${d.variable}) has no fallback, and nothing sets ${d.variable} on this element or above it.`, confirmed: true };
+    case "dropped-rule":
+      return { text: `A selector list is all or nothing: one part the browser can't read (${d.unsupported}) drops the rule for every part.`, confirmed: true };
     default:
       return undefined;
   }
@@ -451,11 +619,124 @@ export async function run(options: RunOptions): Promise<RunResult> {
       `(${detectSrc})(${JSON.stringify({ checkTapTargets: scenario.mobile, checkLabels: scenario.labels, checkFixed: scenario.checkFixed, checkBars: !scenario.mobile, checkWords: scenario.stress !== "long-word", ignore, ...extra })})`;
     const invalid = await inPage<string[]>(baseline.page, `${JSON.stringify(ignore)}.filter((s) => { try { document.querySelector(s); return false; } catch { return true; } })`);
     if (invalid.length) throw new Error(`--ignore "${invalid[0]}" isn't a valid CSS selector.`);
+    const probeIn = <T>(page: Page, scenario: Scenario, request: Record<string, unknown>) => inPage<T>(page, scan(scenario, { probe: request }));
     const measure = async (page: Page, scenario: Scenario) => {
       const m = await inPage<Measurement>(page, scan(scenario));
+      const more = async (op: string) => (await probeIn<Seen<RawFinding>>(page, scenario, { op })).findings;
+      // Each check that hit its limit keeps its own cap: these come from separate passes.
+      if (!scenario.blockImages) m.findings.push(...(await more("backgrounds")));
+      m.findings.push(...(await more("sheets")));
       if (scenario.media) m.findings.push(...(await invisibleMedia(page, scenario)));
+      if (scenario.blockImages) m.findings.push(...(await unreadableText(page, scenario)));
+      if (!scenario.mobile && scenario.interact !== "none") m.findings.push(...(await chaining(page, scenario)));
       return m;
     };
+
+    // Scrollers laid over the page: scroll each to its end with the real
+    // wheel and see whether the page behind moves. Then try the fix.
+    async function chaining(page: Page, scenario: Scenario): Promise<RawFinding[]> {
+      const found: RawFinding[] = [];
+      const targets = await probeIn<{ selector: string }[]>(page, scenario, { op: "chainers" });
+      const turn = async (selector: string, contain: boolean) => {
+        const at = await probeIn<{ x: number; y: number } | null>(page, scenario, { op: "chainStart", selector, contain });
+        if (!at) return null;
+        await page.mouse.move(at.x, at.y);
+        await page.mouse.wheel(0, 600);
+        await inPage(page, SETTLE);
+        await page.waitForTimeout(250);
+        return at;
+      };
+      for (const { selector } of targets) {
+        // chainEnd always runs: it puts the panel and the page back where they were.
+        const reached = await turn(selector, false);
+        const first = await probeIn<{ moved: boolean }>(page, scenario, { op: "chainEnd", selector });
+        if (!reached || !first.moved) continue;
+        await turn(selector, true);
+        const second = await probeIn<{ moved: boolean }>(page, scenario, { op: "chainEnd", selector });
+        const seen = await probeIn<Seen<RawFinding>>(page, scenario, { op: "chainEnd", selector, report: true, contained: !second.moved });
+        found.push(...seen.findings);
+      }
+      await page.mouse.move(0, 0);
+      return found;
+    }
+
+    // Text laid over an image, once the image has failed: is it still
+    // readable on what is left behind it? Two screenshots: as shown, and
+    // with that text hidden, to read the colour behind it.
+    async function unreadableText(page: Page, scenario: Scenario): Promise<RawFinding[]> {
+      const list = await probeIn<(RawMedia & { color: string; large: boolean })[]>(page, scenario, { op: "overImage" });
+      if (!list.length) return [];
+      try {
+        await probeIn(page, scenario, { op: "textStyle", hide: true });
+        const behind = decodePng(await page.screenshot({ fullPage: true, scale: "css", animations: "disabled" }));
+        const found: RawFinding[] = [];
+        for (const item of list) {
+          const back = commonColor(behind, item.box);
+          const ink = item.color.match(/[\d.]+/g)?.map(Number);
+          if (!back || !ink) continue;
+          const alpha = ink[3] ?? 1;
+          const text = [0, 1, 2].map((i) => Math.round(ink[i]! * alpha + back[i]! * (1 - alpha)));
+          const ratio = contrast(text, back);
+          const needed = item.large ? 3 : 4.5;
+          if (ratio >= needed) continue;
+          const hex = (c: number[]) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+          found.push({ ...item, kind: "unreadable-without-image", details: { color: hex(text), back: hex(back), contrast: ratio.toFixed(2), needed } });
+        }
+        return found.slice(0, 25);
+      } catch {
+        notes.push(`Caliper couldn't compare text colours ${scenario.phrase}, so text over images wasn't checked there.`);
+        return [];
+      } finally {
+        await probeIn(page, scenario, { op: "textStyle" });
+      }
+    }
+
+    // Touch screens: a tap applies :hover and leaves it on. Caliper forces
+    // the hover state through the browser's developer tools rather than
+    // tapping, because a tap would follow links. The same for focus, to read
+    // a text field's size as it takes focus.
+    async function touch(page: Page, scenario: Scenario): Promise<RawFinding[]> {
+      const found: RawFinding[] = [];
+      const cdp = await page.context().newCDPSession(page);
+      try {
+        await cdp.send("DOM.enable");
+        await cdp.send("CSS.enable");
+        const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
+        const nodeOf = async (selector: string) => (await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector }).catch(() => ({ nodeId: 0 }))).nodeId;
+        const force = (nodeId: number, forcedPseudoClasses: string[]) => cdp.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses });
+        const settle = () => inPage(page, `(async () => { await ${SETTLE}; await Promise.race([Promise.allSettled(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished)), new Promise((r) => setTimeout(r, 400))]); })()`);
+        interface Look { lift: string[]; fill: boolean; shown: boolean[] }
+        for (const { selector } of await probeIn<{ selector: string }[]>(page, scenario, { op: "hoverRules" })) {
+          const nodeId = await nodeOf(selector);
+          if (!nodeId) continue;
+          const before = await probeIn<Look | null>(page, scenario, { op: "touchLook", selector });
+          await force(nodeId, ["hover"]);
+          await settle();
+          const after = await probeIn<Look | null>(page, scenario, { op: "touchLook", selector });
+          await force(nodeId, []);
+          await settle();
+          if (!before || !after) continue;
+          const revealed = after.shown.some((on, i) => on && before.shown[i] === false);
+          const lifted = after.lift.some((v, i) => v !== before.lift[i]);
+          const filled = after.fill && !before.fill;
+          if (!revealed && !lifted && !filled) continue;
+          found.push(...(await probeIn<Seen<RawFinding>>(page, scenario, { op: "touchReport", selector, revealed, change: revealed ? "reveal" : lifted ? "lift" : "fill" })).findings);
+        }
+        for (const { selector } of await probeIn<{ selector: string }[]>(page, scenario, { op: "fields" })) {
+          const nodeId = await nodeOf(selector);
+          if (!nodeId) continue;
+          await force(nodeId, ["focus", "focus-visible", "focus-within"]);
+          const size = await probeIn<number | null>(page, scenario, { op: "fieldSize", selector });
+          await force(nodeId, []);
+          if (size !== null && size < 16) found.push(...(await probeIn<Seen<RawFinding>>(page, scenario, { op: "fieldReport", selector, size })).findings);
+        }
+      } catch {
+        notes.push(`Caliper couldn't force hover and focus states ${scenario.phrase}, so touch hover and field zoom weren't checked there.`);
+      } finally {
+        await cdp.detach().catch(() => {});
+      }
+      return found;
+    }
 
     // Images that vanish into their background. Three full-page screenshots,
     // whatever the number of images: as shown, images hidden, images inverted.
@@ -474,10 +755,17 @@ export async function run(options: RunOptions): Promise<RunResult> {
         const found: RawFinding[] = [];
         for (const item of list) {
           const ink = inkIn(shown, behind, inverted, item.box);
-          if (!ink?.vanishes) continue;
-          found.push({ ...item, kind: "invisible-media", details: { ink: ink.ink, back: ink.back, contrast: ink.contrast.toFixed(2), visible: Math.round(ink.visible * 100) } });
+          if (!ink) continue;
+          const edge = edgeOf(shown, inverted, item.box);
+          // A ring or outline drawn around it frames it, even when the image itself is pale.
+          const framed = edge.edges >= 16 && edge.lost < edge.edges * 0.5;
+          if (ink.vanishes && !framed) {
+            found.push({ ...item, kind: "invisible-media", details: { ink: ink.ink, back: ink.back, contrast: ink.contrast.toFixed(2), visible: Math.round(ink.visible * 100) } });
+          } else if (!ink.vanishes && item.label.startsWith("img") && item.box.width >= 24 && item.box.height >= 24 && edge.edges >= 16 && edge.lost > edge.edges * 0.8) {
+            found.push({ ...item, kind: "edge-lost", details: { lost: Math.round((edge.lost / edge.edges) * 100) } });
+          }
         }
-        return found.slice(0, 25);
+        return found.slice(0, 50);
       } catch {
         notes.push(`Caliper couldn't compare image pixels ${scenario.phrase}, so images that vanish into their background weren't checked there.`);
         return [];
@@ -527,6 +815,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
       const { context, page, m } = opened;
       for (const kind of m.capped ?? []) capped.push({ scenario: scenario.id, rule: toRule(m.findings.find((f) => f.kind === kind)!, scenario) });
       try {
+        if (scenario.touch) m.findings.push(...(await touch(page, scenario)));
         await merge(scenario, page, m);
         // --no-interact stops what Caliper finds alone. Scripted states were
         // asked for by name, so they always run.
@@ -570,7 +859,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
       const isBaseline = scenario.id === "baseline";
       // `group` decides which findings share a card. Flex items that break
       // the same row are one problem, so they group by their row.
-      const raws: { rule: RuleId; selector: string; label: string; role: Role; text: string; cause?: { text: string; confirmed: boolean }; group: string }[] = m.findings.map((raw) => ({
+      const raws: { rule: RuleId; selector: string; label: string; role: Role; text: string; cause?: { text: string; confirmed: boolean }; group: string; fixes?: Fixes }[] = m.findings.map((raw) => ({
         rule: toRule(raw, scenario),
         selector: raw.selector,
         label: raw.label,
@@ -579,7 +868,13 @@ export async function run(options: RunOptions): Promise<RunResult> {
         cause: cause(raw),
         // The page scrolling sideways is one symptom per scenario, however
         // many elements cause it: one card, the culprits listed under it.
-        group: raw.kind === "flex-shrink" ? String(raw.details.container) : raw.kind === "page-overflow" ? `page@${scenario.id}` : raw.selector,
+        group: raw.kind === "flex-shrink" || raw.kind === "flex-column" || raw.kind === "fixed-width" ? String(raw.details.container)
+          : raw.kind === "page-overflow" ? `page@${scenario.id}`
+          : raw.kind === "covered-by-pinned" ? String(raw.details.layerSelector)
+          : raw.kind === "dropped-rule" ? String(raw.details.selector)
+          : raw.kind === "var-unresolved" ? `${raw.details.variable}|${raw.details.property}`
+          : raw.selector,
+        fixes: fixesFor(raw),
       }));
 
       // Broken images: compare each image's box with the baseline, matched by
@@ -635,6 +930,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
           ...(state ? { state } : {}),
           shots: {},
           similar: [],
+          ...(raw.fixes ? { fixes: raw.fixes } : {}),
         };
         byKey.set(key, finding);
 
